@@ -1,0 +1,36 @@
+# =============================================================================
+# PERFIL PERFORMANCE (PUNTO 6)
+# =============================================================================
+# Faster-Whisper large-v3 int8 (quantizado). Maxima velocidad.
+# VRAM Requerida: ~3 GB (ver profile_vram.performance_required_gb)
+# Destino: Prototipado rapido / procesamiento por lotes grandes / CPU / laptops.
+# =============================================================================
+processing:
+  profile: performance
+  device: auto
+  force_cpu: false
+
+asr:
+  adapter: faster-whisper
+  model_name: large-v3
+  compute_type: int8_float16
+  beam_size: 1
+  batch_size: 16
+  temperature: 0.0
+  word_timestamps: true
+
+diarization:
+  adapter: speechbrain
+  model_name: speechbrain/spkrec-ecapa-voxceleb
+
+quality:
+  quality_enabled: true
+  quality_strict_mode: false
+  quality_min_score_to_save: 0.20
+
+metrics:
+  metrics_enabled: true
+  metrics_track_step_timings: true
+  metrics_track_memory_peak: false
+  metrics_track_gpu_util: false
+  metrics_poll_interval_ms: 500

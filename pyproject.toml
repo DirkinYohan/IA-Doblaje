@@ -1,0 +1,262 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ia-doblaje-engine"
+version = "0.1.0"
+description = "IA Profesional de Doblaje Automatico - Fase 1: Motor de Analisis de Audio"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "Proprietary - Internal Use - See LICENSE file" }
+authors = [
+    { name = "IA Doblaje Engineering Team" }
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26,<2.1",
+    "torch>=2.3,<2.5",
+    "torchaudio>=2.3,<2.5",
+    "pydantic>=2.7,<2.10",
+    "pydantic-settings>=2.3,<2.5",
+    "fastapi>=0.111,<0.116",
+    "uvicorn>=0.30,<0.33",
+    "typer>=0.9,<0.16",
+    "rich>=13.7,<14.0",
+    "structlog>=24.2,<25.0",
+    "httpx>=0.27,<0.28",
+    "huggingface-hub>=0.23,<0.26",
+    "soundfile>=0.12,<0.13",
+    "python-magic-bin>=0.4.14; sys_platform == \"win32\"",
+    "python-magic>=0.4.27; sys_platform != \"win32\"",
+    "psutil>=5.9,<6.0",
+    "PyYAML>=6.0,<7.0",
+    "transformers>=4.41,<4.45",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9.0",
+    "pytest-asyncio>=0.23,<0.25",
+    "pytest-cov>=5.0,<6.0",
+    "pytest-mock>=3.14,<4.0",
+    "pytest-xdist>=3.6,<4.0",
+    "pytest-pretty>=1.2,<2.0",
+    "pytest-rerunfailures>=14.0,<15.0",
+]
+quality = [
+    "ruff>=0.5,<0.7",
+    "mypy>=1.10,<1.12",
+    "types-PyYAML",
+    "types-psutil",
+    "bandit>=1.7,<2.0",
+    "pip-licenses>=5.0,<6.0",
+]
+asr = [
+    "transformers>=4.41,<4.45",
+    "accelerate>=0.30,<0.34",
+    "datasets>=2.19,<2.22",
+    "faster-whisper>=1.0.0,<1.1.0",
+]
+diarization = [
+    "pyannote.audio>=3.3,<3.4",
+]
+vad = [
+    "silero-vad>=5.1,<5.2",
+]
+all = [
+    "ia-doblaje-engine[dev,quality,asr,diarization,vad]",
+]
+
+[project.scripts]
+ia-doblaje = "app.presentation.cli.main_group:app"
+
+[project.urls]
+Documentation = "https://github.com/ia-doblaje/engine/docs"
+Source = "https://github.com/ia-doblaje/engine"
+Issues = "https://github.com/ia-doblaje/engine/issues"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = [
+    "tests*",
+    "scripts*",
+    "data*",
+    "configs*",
+    "docs*",
+    "models*",
+]
+
+[tool.setuptools.package-data]
+"app" = ["py.typed"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--color=yes",
+]
+markers = [
+    "slow: tests that require > 10 seconds (skip with -m 'not slow')",
+    "integration: tests that run full pipeline end-to-end",
+    "unit: tests for individual classes/functions in isolation",
+    "quality: tests for quality analysis module",
+    "requires_gpu: tests requiring a CUDA-capable GPU",
+    "requires_models: tests requiring AI model downloads",
+    "requires_ffmpeg: tests requiring FFmpeg binary available",
+]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:transformers.*:",
+    "ignore::DeprecationWarning:torch.*:",
+    "ignore::UserWarning:torchaudio.*:",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+indent-width = 4
+preview = false
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "RUF",   # Ruff-specific
+    "PERF",  # perflint
+    "FLY",   # flynt
+]
+ignore = [
+    "E501",     # line-length handled by formatter
+    "B008",     # function calls in defaults - allow Pydantic
+    "C408",     # dict/list/tuple calls - allow
+    "UP007",    # use list instead of List - keep typing for compatibility
+    "UP006",    # use dict instead of Dict
+    "TCH001",   # allow TYPE_CHECKING dynamic when needed
+]
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["S101", "B018", "ARG001", "S311", "S108"]
+"scripts/*" = ["T201", "INP001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+case-sensitive = true
+lines-after-imports = 2
+force-single-line = true
+"order-by-type" = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+strict_equality = true
+no_implicit_optional = true
+local_partial_types = true
+show_error_codes = true
+show_column_numbers = true
+show_error_end = true
+color_output = true
+pretty = true
+error_summary = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_calls = false
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_reexport = true
+explicit_package_bases = true
+files = ["app"]
+mypy_path = "."
+
+[[tool.mypy.overrides]]
+module = [
+    "tests.*",
+    "scripts.*",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "torch",
+    "torchaudio",
+    "transformers",
+    "pyannote.*",
+    "silero_vad",
+    "faster_whisper",
+    "ctranslate2",
+]
+ignore_missing_imports = true
+
+[tool.bandit]
+targets = ["app"]
+exclude_dirs = ["tests", "scripts", "docs", "data"]
+skips = ["B101", "B603"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    "app/presentation/*",
+    "*/__init__.py",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "assert_never",
+    "@abstractmethod",
+    "class .*\\bProtocol\\b",
+    "pass",
+]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.paths]
+source = [
+    "app/",
+]

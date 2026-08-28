@@ -1,0 +1,450 @@
+﻿[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m [ 18%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m [ 36%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m [ 55%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[31mF[0m[31m                            [ 66%][0m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py:306 test_adapter_happy_path_1_interval_and_silences[0m[32m.[0m[31m [ 67%]
+[0m[31mF[0m[31m                                                                        [ 67%][0m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py:362 test_adapter_merge_proximal_real_simulated[0m[32m.[0m[31m [ 67%]
+[0m[31mF[0m[31m                                                                        [ 67%][0m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py:411 test_adapter_threshold_overrides_applied[0m[31mF[0m[31m [ 68%]
+[0m[31m                                                                         [ 68%][0m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py:425 test_adapter_deterministic_two_runs_equal[0m[31mF[0m[31m [ 68%]
+[0m[31m                                                                         [ 68%][0m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py:445 test_adapter_total_duration_ms_correct_25s[0m[32m.[0m[31m [ 68%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[31m [ 86%]
+[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[32m.[0m[31m                      [100%][0m
+================================== FAILURES ===================================
+[31m[1m_______________ test_adapter_happy_path_1_interval_and_silences _______________[0m
+
+tmp_path = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_happy_path_1_inte0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013912959E80>
+
+    [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_adapter_happy_path_1_interval_and_silences[39;49;00m(tmp_path, monkeypatch) -> [94mNone[39;49;00m:[90m[39;49;00m
+        \x1b[90m# 1s audio, 16kHz \u2192 16000 samples \u2192 frames 512 \u2192 32 frames aprox\x1b[39;49;00m\x1b[90m\x1b[39;49;00m
+        total_samples = [94m16000[39;49;00m  [90m# 1 seg[39;49;00m[90m[39;49;00m
+        audio = np.zeros(total_samples, dtype=np.int16)[90m[39;49;00m
+        wav, *_ = create_synthetic_wav_pcm16([90m[39;49;00m
+            tmp_path / [33m"[39;49;00m[33minp.wav[39;49;00m[33m"[39;49;00m, duration_sec=[94m1.0[39;49;00m, sample_rate_hz=[94m16000[39;49;00m, channels=[94m1[39;49;00m[90m[39;49;00m
+        )[90m[39;49;00m
+        [90m# frames ~ 31[39;49;00m[90m[39;49;00m
+        probs = np.zeros([94m32[39;49;00m, dtype=np.float32)[90m[39;49;00m
+        probs[[94m3[39;49;00m:[94m10[39;49;00m] = [94m0.95[39;49;00m  [90m# 256..1024 ms ~ voice[39;49;00m[90m[39;49;00m
+        model = _FakeJITModel(p_array=probs)[90m[39;49;00m
+        _patch_env_for_adapter(monkeypatch, wav_path=wav, audio_np_int16=audio, jit_model=model)[90m[39;49;00m
+        settings = _settings(tmp_path)[90m[39;49;00m
+        ad = SileroVADAdapter(settings=settings)[90m[39;49;00m
+        prep = _fake_preprocessed(wav, duration_sec=[94m1.0[39;49;00m)[90m[39;49;00m
+>       res: VadResult = ad.detect([90m[39;49;00m
+            prep, thresholds=VadThresholds(speech_threshold=[94m0.5[39;49;00m, merge_proximal_ms=[94m200[39;49;00m), job_id=[33m"[39;49;00m[33mjob1[39;49;00m[33m"[39;49;00m[90m[39;49;00m
+        )[90m[39;49;00m
+
+_          = [16000, 16000, 1, 1.0]
+ad         = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391292BB00>
+audio      = array([0, 0, 0, ..., 0, 0, 0], dtype=int16)
+model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  ...0.  , 0.  , 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013912959E80>
+prep       = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_hap...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+probs      = array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32)
+settings   = AppSettings(general=GeneralConfig(app_name='IA Doblaje Engine', app_env='development', app_debug=True, app_log_level='...a/output/logs'), log_rotation='100 MB', log_retention='30 days', log_include_process_id=True, log_include_job_id=True))
+tmp_path   = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_happy_path_1_inte0')
+total_samples = 16000
+wav        = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_happy_path_1_inte0/inp.wav')
+
+[1m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py[0m:322: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:226: in detect
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+        _np        = <module 'numpy' from 'C:\\Users\\Dirkin\\Documents\\IA Doblaje\\.venv-doblaje\\Lib\\site-packages\\numpy\\__init__.py'>
+        audio_f32  = array([[0., 0., 0., ..., 0., 0., 0.]], dtype=float32)
+        job_id     = 'job1'
+        logger     = None
+        merged     = [{'end_ms': 320, 'max_conf': 0.949999988079071, 'sample_count': 3584, 'start_ms': 96}]
+        model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  ...0.  , 0.  , 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+        preprocessed = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_hap...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+        self       = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391292BB00>
+        sr         = 16000
+        t0         = 282933.6424787
+        thr        = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=200, min_silence_between_ms=300, merge_proximal_ms=200)
+        thresholds = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=200, min_silence_between_ms=300, merge_proximal_ms=200)
+        timestamps = [{'end_ms': 320, 'max_conf': 0.949999988079071, 'sample_count': 3584, 'start_ms': 96}]
+        total_duration_ms = 1000
+        total_samples = 16000
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x00000139128C0E20>
+
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+>       VoiceInterval([90m[39;49;00m
+            start_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            end_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            max_conf=[96mfloat[39;49;00m(x[[33m"[39;49;00m[33mmax_conf[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            duration_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]) - [96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            sample_count=[96mint[39;49;00m(x[[33m"[39;49;00m[33msample_count[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+        )[90m[39;49;00m
+        [94mfor[39;49;00m x [95min[39;49;00m merged[90m[39;49;00m
+    )[90m[39;49;00m
+[1m[31mE   pydantic_core._pydantic_core.ValidationError: 2 validation errors for VoiceInterval[0m
+[1m[31mE   max_confidence[0m
+[1m[31mE     Field required [type=missing, input_value={'start_ms': 96, 'end_ms'...4, 'sample_count': 3584}, input_type=dict][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/missing[0m
+[1m[31mE   max_conf[0m
+[1m[31mE     Extra inputs are not permitted [type=extra_forbidden, input_value=0.949999988079071, input_type=float][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/extra_forbidden[0m
+
+.0         = <list_iterator object at 0x00000139128C0E20>
+x          = {'end_ms': 320, 'max_conf': 0.949999988079071, 'sample_count': 3584, 'start_ms': 96}
+
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:227: ValidationError
+[31m[1m_________________ test_adapter_merge_proximal_real_simulated __________________[0m
+
+tmp_path = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_merge_proximal_re0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000139129F02F0>
+
+    [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_adapter_merge_proximal_real_simulated[39;49;00m(tmp_path, monkeypatch) -> [94mNone[39;49;00m:[90m[39;49;00m
+        wav, *_ = create_synthetic_wav_pcm16(tmp_path / [33m"[39;49;00m[33mm.wav[39;49;00m[33m"[39;49;00m, duration_sec=[94m1.0[39;49;00m)[90m[39;49;00m
+        audio = np.zeros([94m16000[39;49;00m, dtype=np.int16)[90m[39;49;00m
+        \x1b[90m# Voz 100..300ms, gap 150ms \u2192 voz 450..600ms\x1b[39;49;00m\x1b[90m\x1b[39;49;00m
+        \x1b[90m# Merge threshold=200 \u2192 deben fusionarse en uno solo 100..600\x1b[39;49;00m\x1b[90m\x1b[39;49;00m
+        probs = np.zeros([94m32[39;49;00m, dtype=np.float32)[90m[39;49;00m
+        [90m# frame i cubre samples i*512; ms ~ i*32[39;49;00m[90m[39;49;00m
+        \x1b[90m# voz 100..300 \u2192 frames 3..10 (3*32=96 ms ~ 100 ; 10*32=320 ms ~ 300)\x1b[39;49;00m\x1b[90m\x1b[39;49;00m
+        probs[[94m3[39;49;00m:[94m10[39;49;00m] = [94m0.95[39;49;00m[90m[39;49;00m
+        \x1b[90m# voz 450..600 \u2192 frames 14..19 (14*32=448, 19*32=608)\x1b[39;49;00m\x1b[90m\x1b[39;49;00m
+        probs[[94m14[39;49;00m:[94m19[39;49;00m] = [94m0.85[39;49;00m[90m[39;49;00m
+        model = _FakeJITModel(p_array=probs)[90m[39;49;00m
+        _patch_env_for_adapter(monkeypatch, wav_path=wav, audio_np_int16=audio, jit_model=model)[90m[39;49;00m
+        ad = SileroVADAdapter(settings=_settings(tmp_path))[90m[39;49;00m
+        thr = VadThresholds([90m[39;49;00m
+            speech_threshold=[94m0.5[39;49;00m,[90m[39;49;00m
+            merge_proximal_ms=[94m300[39;49;00m,  [90m# suficientemente grande 300 > 150 gap[39;49;00m[90m[39;49;00m
+            min_speech_duration_ms=[94m20[39;49;00m,[90m[39;49;00m
+        )[90m[39;49;00m
+>       res = ad.detect(_fake_preprocessed(wav, duration_sec=[94m1.0[39;49;00m), thresholds=thr)[90m[39;49;00m
+
+_          = [16000, 16000, 1, 1.0]
+ad         = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391295BEC0>
+audio      = array([0, 0, 0, ..., 0, 0, 0], dtype=int16)
+model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  ...0.85, 0.85, 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000139129F02F0>
+probs      = array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  , 0.85, 0.85, 0.85, 0.85, 0.85, 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32)
+thr        = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=20, min_silence_between_ms=300, merge_proximal_ms=300)
+tmp_path   = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_merge_proximal_re0')
+wav        = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_merge_proximal_re0/m.wav')
+
+[1m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py[0m:382: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:226: in detect
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+        _np        = <module 'numpy' from 'C:\\Users\\Dirkin\\Documents\\IA Doblaje\\.venv-doblaje\\Lib\\site-packages\\numpy\\__init__.py'>
+        audio_f32  = array([[0., 0., 0., ..., 0., 0., 0.]], dtype=float32)
+        job_id     = None
+        logger     = None
+        merged     = [{'end_ms': 608, 'max_conf': 0.949999988079071, 'sample_count': 6144, 'start_ms': 96}]
+        model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  ...0.85, 0.85, 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+        preprocessed = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_mer...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+        self       = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391295BEC0>
+        sr         = 16000
+        t0         = 282934.5193554
+        thr        = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=20, min_silence_between_ms=300, merge_proximal_ms=300)
+        thresholds = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=20, min_silence_between_ms=300, merge_proximal_ms=300)
+        timestamps = [{'end_ms': 608, 'max_conf': 0.949999988079071, 'sample_count': 6144, 'start_ms': 96}]
+        total_duration_ms = 1000
+        total_samples = 16000
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x0000013912959420>
+
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+>       VoiceInterval([90m[39;49;00m
+            start_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            end_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            max_conf=[96mfloat[39;49;00m(x[[33m"[39;49;00m[33mmax_conf[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            duration_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]) - [96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            sample_count=[96mint[39;49;00m(x[[33m"[39;49;00m[33msample_count[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+        )[90m[39;49;00m
+        [94mfor[39;49;00m x [95min[39;49;00m merged[90m[39;49;00m
+    )[90m[39;49;00m
+[1m[31mE   pydantic_core._pydantic_core.ValidationError: 2 validation errors for VoiceInterval[0m
+[1m[31mE   max_confidence[0m
+[1m[31mE     Field required [type=missing, input_value={'start_ms': 96, 'end_ms'...2, 'sample_count': 6144}, input_type=dict][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/missing[0m
+[1m[31mE   max_conf[0m
+[1m[31mE     Extra inputs are not permitted [type=extra_forbidden, input_value=0.949999988079071, input_type=float][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/extra_forbidden[0m
+
+.0         = <list_iterator object at 0x0000013912959420>
+x          = {'end_ms': 608, 'max_conf': 0.949999988079071, 'sample_count': 6144, 'start_ms': 96}
+
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:227: ValidationError
+[31m[1m__________________ test_adapter_threshold_overrides_applied ___________________[0m
+
+tmp_path = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_threshold_overrid0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001391295AA50>
+
+    [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_adapter_threshold_overrides_applied[39;49;00m(tmp_path, monkeypatch) -> [94mNone[39;49;00m:[90m[39;49;00m
+        wav, *_ = create_synthetic_wav_pcm16(tmp_path / [33m"[39;49;00m[33mt.wav[39;49;00m[33m"[39;49;00m, duration_sec=[94m1.0[39;49;00m)[90m[39;49;00m
+        audio = np.zeros([94m16000[39;49;00m, dtype=np.int16)[90m[39;49;00m
+        probs = np.zeros([94m32[39;49;00m, dtype=np.float32)[90m[39;49;00m
+        probs[\x1b[94m5\x1b[39;49;00m:\x1b[94m15\x1b[39;49;00m] = \x1b[94m0.55\x1b[39;49;00m  \x1b[90m# umbral default 0.5 \u2192 voz detectada; 0.6 \u2192 NO.\x1b[39;49;00m\x1b[90m\x1b[39;49;00m
+        model = _FakeJITModel(p_array=probs)[90m[39;49;00m
+        _patch_env_for_adapter(monkeypatch, wav_path=wav, audio_np_int16=audio, jit_model=model)[90m[39;49;00m
+        ad = SileroVADAdapter(settings=_settings(tmp_path))[90m[39;49;00m
+        prep = _fake_preprocessed(wav, duration_sec=[94m1.0[39;49;00m)[90m[39;49;00m
+>       r_low = ad.detect(prep, thresholds=VadThresholds(speech_threshold=[94m0.5[39;49;00m, min_speech_duration_ms=[94m20[39;49;00m))[90m[39;49;00m
+
+_          = [16000, 16000, 1, 1.0]
+ad         = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391273F320>
+audio      = array([0, 0, 0, ..., 0, 0, 0], dtype=int16)
+model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.  , 0.  , 0.55, 0.55, 0.55, 0.55, 0.55, 0.55,
+       0.55, 0.55, 0.55...0.  , 0.  , 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001391295AA50>
+prep       = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_thr...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+probs      = array([0.  , 0.  , 0.  , 0.  , 0.  , 0.55, 0.55, 0.55, 0.55, 0.55, 0.55,
+       0.55, 0.55, 0.55, 0.55, 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32)
+tmp_path   = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_threshold_overrid0')
+wav        = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_threshold_overrid0/t.wav')
+
+[1m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py[0m:421: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:226: in detect
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+        _np        = <module 'numpy' from 'C:\\Users\\Dirkin\\Documents\\IA Doblaje\\.venv-doblaje\\Lib\\site-packages\\numpy\\__init__.py'>
+        audio_f32  = array([[0., 0., 0., ..., 0., 0., 0.]], dtype=float32)
+        job_id     = None
+        logger     = None
+        merged     = [{'end_ms': 480, 'max_conf': 0.550000011920929, 'sample_count': 5120, 'start_ms': 160}]
+        model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.  , 0.  , 0.55, 0.55, 0.55, 0.55, 0.55, 0.55,
+       0.55, 0.55, 0.55...0.  , 0.  , 0.  , 0.  , 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+        preprocessed = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_thr...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+        self       = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391273F320>
+        sr         = 16000
+        t0         = 282934.6739163
+        thr        = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=20, min_silence_between_ms=300, merge_proximal_ms=200)
+        thresholds = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=20, min_silence_between_ms=300, merge_proximal_ms=200)
+        timestamps = [{'end_ms': 480, 'max_conf': 0.550000011920929, 'sample_count': 5120, 'start_ms': 160}]
+        total_duration_ms = 1000
+        total_samples = 16000
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000001391292A680>
+
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+>       VoiceInterval([90m[39;49;00m
+            start_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            end_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            max_conf=[96mfloat[39;49;00m(x[[33m"[39;49;00m[33mmax_conf[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            duration_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]) - [96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            sample_count=[96mint[39;49;00m(x[[33m"[39;49;00m[33msample_count[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+        )[90m[39;49;00m
+        [94mfor[39;49;00m x [95min[39;49;00m merged[90m[39;49;00m
+    )[90m[39;49;00m
+[1m[31mE   pydantic_core._pydantic_core.ValidationError: 2 validation errors for VoiceInterval[0m
+[1m[31mE   max_confidence[0m
+[1m[31mE     Field required [type=missing, input_value={'start_ms': 160, 'end_ms...0, 'sample_count': 5120}, input_type=dict][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/missing[0m
+[1m[31mE   max_conf[0m
+[1m[31mE     Extra inputs are not permitted [type=extra_forbidden, input_value=0.550000011920929, input_type=float][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/extra_forbidden[0m
+
+.0         = <list_iterator object at 0x000001391292A680>
+x          = {'end_ms': 480, 'max_conf': 0.550000011920929, 'sample_count': 5120, 'start_ms': 160}
+
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:227: ValidationError
+[31m[1m__________________ test_adapter_deterministic_two_runs_equal __________________[0m
+
+tmp_path = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_deterministic_two0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000139129F2420>
+
+    [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_adapter_deterministic_two_runs_equal[39;49;00m(tmp_path, monkeypatch) -> [94mNone[39;49;00m:[90m[39;49;00m
+        wav, *_ = create_synthetic_wav_pcm16(tmp_path / [33m"[39;49;00m[33md.wav[39;49;00m[33m"[39;49;00m, duration_sec=[94m1.0[39;49;00m)[90m[39;49;00m
+        audio = np.zeros([94m16000[39;49;00m, dtype=np.int16)[90m[39;49;00m
+        probs = np.zeros([94m32[39;49;00m, dtype=np.float32)[90m[39;49;00m
+        probs[[94m3[39;49;00m:[94m10[39;49;00m] = [94m0.95[39;49;00m[90m[39;49;00m
+        probs[[94m20[39;49;00m:[94m25[39;49;00m] = [94m0.8[39;49;00m[90m[39;49;00m
+        model = _FakeJITModel(p_array=probs)[90m[39;49;00m
+        _patch_env_for_adapter(monkeypatch, wav_path=wav, audio_np_int16=audio, jit_model=model)[90m[39;49;00m
+        ad = SileroVADAdapter(settings=_settings(tmp_path))[90m[39;49;00m
+        prep = _fake_preprocessed(wav, duration_sec=[94m1.0[39;49;00m)[90m[39;49;00m
+>       a = ad.detect(prep)[90m[39;49;00m
+
+_          = [16000, 16000, 1, 1.0]
+ad         = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x0000013912813BC0>
+audio      = array([0, 0, 0, ..., 0, 0, 0], dtype=int16)
+model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  ...0.  , 0.  , 0.  , 0.8 , 0.8 ,
+       0.8 , 0.8 , 0.8 , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000139129F2420>
+prep       = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_det...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+probs      = array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.8 , 0.8 ,
+       0.8 , 0.8 , 0.8 , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32)
+tmp_path   = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_deterministic_two0')
+wav        = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_deterministic_two0/d.wav')
+
+[1m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py[0m:436: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:226: in detect
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+        _np        = <module 'numpy' from 'C:\\Users\\Dirkin\\Documents\\IA Doblaje\\.venv-doblaje\\Lib\\site-packages\\numpy\\__init__.py'>
+        audio_f32  = array([[0., 0., 0., ..., 0., 0., 0.]], dtype=float32)
+        job_id     = None
+        logger     = None
+        merged     = [{'end_ms': 320, 'max_conf': 0.949999988079071, 'sample_count': 3584, 'start_ms': 96}]
+        model      = _FakeJITModel(p_array=array([0.  , 0.  , 0.  , 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.  ,
+       0.  , 0.  , 0.  ...0.  , 0.  , 0.  , 0.8 , 0.8 ,
+       0.8 , 0.8 , 0.8 , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+      dtype=float32))
+        preprocessed = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_det...ize_bytes=32044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+        self       = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x0000013912813BC0>
+        sr         = 16000
+        t0         = 282934.7547592
+        thr        = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=200, min_silence_between_ms=300, merge_proximal_ms=200)
+        thresholds = None
+        timestamps = [{'end_ms': 320, 'max_conf': 0.949999988079071, 'sample_count': 3584, 'start_ms': 96}]
+        total_duration_ms = 1000
+        total_samples = 16000
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000001391295AEC0>
+
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+>       VoiceInterval([90m[39;49;00m
+            start_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            end_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            max_conf=[96mfloat[39;49;00m(x[[33m"[39;49;00m[33mmax_conf[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            duration_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]) - [96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            sample_count=[96mint[39;49;00m(x[[33m"[39;49;00m[33msample_count[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+        )[90m[39;49;00m
+        [94mfor[39;49;00m x [95min[39;49;00m merged[90m[39;49;00m
+    )[90m[39;49;00m
+[1m[31mE   pydantic_core._pydantic_core.ValidationError: 2 validation errors for VoiceInterval[0m
+[1m[31mE   max_confidence[0m
+[1m[31mE     Field required [type=missing, input_value={'start_ms': 96, 'end_ms'...4, 'sample_count': 3584}, input_type=dict][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/missing[0m
+[1m[31mE   max_conf[0m
+[1m[31mE     Extra inputs are not permitted [type=extra_forbidden, input_value=0.949999988079071, input_type=float][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/extra_forbidden[0m
+
+.0         = <list_iterator object at 0x000001391295AEC0>
+x          = {'end_ms': 320, 'max_conf': 0.949999988079071, 'sample_count': 3584, 'start_ms': 96}
+
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:227: ValidationError
+[31m[1m_________________ test_adapter_total_duration_ms_correct_25s __________________[0m
+
+tmp_path = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_total_duration_ms0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001391295B1D0>
+
+    [0m[94mdef[39;49;00m[90m [39;49;00m[92mtest_adapter_total_duration_ms_correct_25s[39;49;00m(tmp_path, monkeypatch) -> [94mNone[39;49;00m:[90m[39;49;00m
+        dur_s = [94m2.5[39;49;00m[90m[39;49;00m
+        samples = [96mint[39;49;00m([94m16000[39;49;00m * dur_s)[90m[39;49;00m
+        wav, *_ = create_synthetic_wav_pcm16(tmp_path / [33m"[39;49;00m[33md25.wav[39;49;00m[33m"[39;49;00m, duration_sec=dur_s)[90m[39;49;00m
+        audio = np.zeros(samples, dtype=np.int16)[90m[39;49;00m
+        frames = [96mint[39;49;00m(math.ceil(samples / [94m512[39;49;00m))[90m[39;49;00m
+        probs = np.zeros(frames, dtype=np.float32)[90m[39;49;00m
+        probs[[94m10[39;49;00m:[94m20[39;49;00m] = [94m0.9[39;49;00m[90m[39;49;00m
+        model = _FakeJITModel(p_array=probs)[90m[39;49;00m
+        _patch_env_for_adapter(monkeypatch, wav_path=wav, audio_np_int16=audio, jit_model=model)[90m[39;49;00m
+        ad = SileroVADAdapter(settings=_settings(tmp_path))[90m[39;49;00m
+>       res = ad.detect(_fake_preprocessed(wav, duration_sec=dur_s))[90m[39;49;00m
+
+_          = [40000, 16000, 1, 2.5]
+ad         = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391295B410>
+audio      = array([0, 0, 0, ..., 0, 0, 0], dtype=int16)
+dur_s      = 2.5
+frames     = 79
+model      = _FakeJITModel(p_array=array([0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0.9, 0.9, 0.9,
+       0.9, 0.9, 0.9, 0..... , 0. , 0. , 0. ,
+       0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. ,
+       0. ], dtype=float32))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001391295B1D0>
+probs      = array([0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0.9, 0.9, 0.9,
+       0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0. ,...0. , 0. , 0. , 0. ,
+       0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. ,
+       0. ], dtype=float32)
+samples    = 40000
+tmp_path   = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_total_duration_ms0')
+wav        = WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_total_duration_ms0/d25.wav')
+
+[1m[31mtests\infrastructure\audio\test_silero_vad_adapter_t04.py[0m:457: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:226: in detect
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+        _np        = <module 'numpy' from 'C:\\Users\\Dirkin\\Documents\\IA Doblaje\\.venv-doblaje\\Lib\\site-packages\\numpy\\__init__.py'>
+        audio_f32  = array([[0., 0., 0., ..., 0., 0., 0.]], dtype=float32)
+        job_id     = None
+        logger     = None
+        merged     = [{'end_ms': 640, 'max_conf': 0.8999999761581421, 'sample_count': 5120, 'start_ms': 320}]
+        model      = _FakeJITModel(p_array=array([0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0.9, 0.9, 0.9,
+       0.9, 0.9, 0.9, 0..... , 0. , 0. , 0. ,
+       0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. , 0. ,
+       0. ], dtype=float32))
+        preprocessed = PreprocessedAudio(wav_path=WindowsPath('C:/Users/Dirkin/AppData/Local/Temp/pytest-of-Dirkin/pytest-53/test_adapter_tot...ize_bytes=80044, sha256='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', applied_filters=('A', 'B'))
+        self       = <app.infrastructure.audio.silero_vad_adapter.SileroVADAdapter object at 0x000001391295B410>
+        sr         = 16000
+        t0         = 282934.8720223
+        thr        = VadThresholds(speech_threshold=0.5, min_speech_duration_ms=200, min_silence_between_ms=300, merge_proximal_ms=200)
+        thresholds = None
+        timestamps = [{'end_ms': 640, 'max_conf': 0.8999999761581421, 'sample_count': 5120, 'start_ms': 320}]
+        total_duration_ms = 2500
+        total_samples = 40000
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000001391295B490>
+
+    [0mvoice_intervals: [96mtuple[39;49;00m[VoiceInterval, ...] = [96mtuple[39;49;00m([90m[39;49;00m
+>       VoiceInterval([90m[39;49;00m
+            start_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            end_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            max_conf=[96mfloat[39;49;00m(x[[33m"[39;49;00m[33mmax_conf[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            duration_ms=[96mint[39;49;00m(x[[33m"[39;49;00m[33mend_ms[39;49;00m[33m"[39;49;00m]) - [96mint[39;49;00m(x[[33m"[39;49;00m[33mstart_ms[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+            sample_count=[96mint[39;49;00m(x[[33m"[39;49;00m[33msample_count[39;49;00m[33m"[39;49;00m]),[90m[39;49;00m
+        )[90m[39;49;00m
+        [94mfor[39;49;00m x [95min[39;49;00m merged[90m[39;49;00m
+    )[90m[39;49;00m
+[1m[31mE   pydantic_core._pydantic_core.ValidationError: 2 validation errors for VoiceInterval[0m
+[1m[31mE   max_confidence[0m
+[1m[31mE     Field required [type=missing, input_value={'start_ms': 320, 'end_ms...0, 'sample_count': 5120}, input_type=dict][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/missing[0m
+[1m[31mE   max_conf[0m
+[1m[31mE     Extra inputs are not permitted [type=extra_forbidden, input_value=0.8999999761581421, input_type=float][0m
+[1m[31mE       For further information visit https://errors.pydantic.dev/2.9/v/extra_forbidden[0m
+
+.0         = <list_iterator object at 0x000001391295B490>
+x          = {'end_ms': 640, 'max_conf': 0.8999999761581421, 'sample_count': 5120, 'start_ms': 320}
+
+[1m[31mapp\infrastructure\audio\silero_vad_adapter.py[0m:227: ValidationError
+                              Summary of Failures                              
++-----------------------------------------------------------------------------+
+|               |               |  Function     |              |              |
+|  File         |  Function     |  Line         |  Error Line  |  Error       |
+|---------------+---------------+---------------+--------------+--------------|
+|  tests\infrà  |  test_adaptà  |  307          |  322         |  Validatioà  |
+|  tests\infrà  |  test_adaptà  |  363          |  382         |  Validatioà  |
+|  tests\infrà  |  test_adaptà  |  412          |  421         |  Validatioà  |
+|  tests\infrà  |  test_adaptà  |  426          |  436         |  Validatioà  |
+|  tests\infrà  |  test_adaptà  |  446          |  457         |  Validatioà  |
++-----------------------------------------------------------------------------+
+Results (6.34s):
+         5 failed
+       386 passed

@@ -1,0 +1,119 @@
+# =============================================================================
+# PYTHON / VIRTUAL ENVIRONMENTS
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+*.egg
+dist/
+build/
+wheels/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+env/
+.env
+!.env.example
+
+# Poetry / Pipenv
+poetry.lock
+Pipfile
+Pipfile.lock
+
+# =============================================================================
+# JUPYTER / IDE
+# =============================================================================
+.ipynb_checkpoints
+*.ipynb_checkpoints
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# =============================================================================
+# TESTING / COVERAGE
+# =============================================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+bandit-report.json
+
+# =============================================================================
+# LOCAL DATA (NO COMMITEAR)
+# =============================================================================
+data/input/*
+data/output/*
+data/temporary/*
+!data/input/.gitkeep
+!data/output/.gitkeep
+!data/temporary/.gitkeep
+
+# =============================================================================
+# MODELOS DESCARGADOS (NO COMMITEAR)
+# =============================================================================
+models/*
+!models/.gitkeep
+
+# =============================================================================
+# LOGS
+# =============================================================================
+*.log
+logs/
+
+# =============================================================================
+# FIXTURES DE PRUEBA (solo los generados - los estáticos no van en gitignore)
+# =============================================================================
+tests/integration/fixtures_clips/*.wav
+tests/integration/fixtures_clips/*.mp4
+tests/integration/fixtures_clips/*.mp3
+!tests/integration/fixtures_clips/.gitkeep
+!tests/fixtures/synthetic_audio.py
+
+# =============================================================================
+# DOCKER / LOCAL
+# =============================================================================
+docker-compose.override.yml
+docker-compose.local.yml
+.docker-data/
+docker-images*.tar
+
+# =============================================================================
+# HUGGINGFACE / AUTH TOKENS (SEGURIDAD)
+# =============================================================================
+*.token
+huggingface_token
+hf_token
+
+# =============================================================================
+# OUTPUTS JSON RESULTADOS (NO COMMITEAR)
+# =============================================================================
+analysis.json
+transcript.json
+speakers.json
+segments.json
+metadata.json
+*.analysis.json

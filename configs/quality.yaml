@@ -1,0 +1,37 @@
+# =============================================================================
+# PERFIL QUALITY (PUNTO 6)
+# =============================================================================
+# Whisper-PyTorch large-v3 FP16. Maxima precision.
+# VRAM Requerida: ~8 GB (ver profile_vram.quality_required_gb en AppSettings)
+# Destino: Produccion final / media master / calidad max.
+# =============================================================================
+processing:
+  profile: quality
+  device: auto
+  force_cpu: false
+
+asr:
+  adapter: whisper-pytorch
+  model_name: large-v3
+  compute_type: float16
+  beam_size: 5
+  batch_size: 0
+  temperature: 0.0
+  word_timestamps: true
+
+diarization:
+  adapter: pyannote
+  model_name: pyannote/speaker-diarization-3.1
+  segmentation_model: pyannote/segmentation-3.0
+
+quality:
+  quality_enabled: true
+  quality_strict_mode: true
+  quality_min_score_to_save: 0.50
+
+metrics:
+  metrics_enabled: true
+  metrics_track_step_timings: true
+  metrics_track_memory_peak: true
+  metrics_track_gpu_util: true
+  metrics_poll_interval_ms: 200
