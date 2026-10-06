@@ -91,7 +91,7 @@ class PathsConfig(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_all_absolute(self) -> "PathsConfig":
-        for fname in self.model_fields.keys():
+        for fname in type(self).model_fields.keys():
             raw = getattr(self, fname)
             p = Path(raw) if not isinstance(raw, Path) else raw
             if not p.is_absolute():
@@ -324,6 +324,11 @@ class TranslationConfig(BaseModel):
     target_language: str = Field(
         "es", description="Idioma destino por defecto (uno de los 8 oficiales)."
     )
+    target_languages: str = Field(
+        "",
+        description="Lista separada por comas. Vacío usa solo target_language.",
+    )
+    glossary_path: str = Field("", description="JSON de glosario término→traducción por idioma.")
     model_dir: str = Field(
         "models/m2m100_418M", description="Ruta relativa al modelo M2M100 local."
     )
@@ -346,7 +351,24 @@ class TranslationConfig(BaseModel):
                 f"translation.target_language inválido: {s!r}. "
                 "Oficiales: es,en,fr,de,it,pt,ja,zh."
             )
-        return s
+            return s
+
+    @property
+    def targets(self) -> list[str]:
+        raw = str(self.target_languages or "").strip()
+        official = {"es", "en", "fr", "de", "it", "pt", "ja", "zh"}
+        if not raw:
+            return [self.target_language]
+        out: list[str] = []
+        for part in raw.split(","):
+            code = part.strip().lower()
+            if not code:
+                continue
+            if code not in official:
+                raise ValueError(f"Idioma destino no oficial: {code}")
+            if code not in out:
+                out.append(code)
+        return out or [self.target_language]
 
 
 class LoggingConfig(BaseModel):
@@ -482,6 +504,8 @@ class AppSettings(BaseSettings):
             "PIPELINE_SKIP_DIARIZATION_ON_ERROR": ("pipeline", "pipeline_skip_diarization_on_error"),
             "TRANSLATION_ENABLED": ("translation", "enabled"),
             "TRANSLATION_TARGET_LANGUAGE": ("translation", "target_language"),
+            "TRANSLATION_TARGET_LANGUAGES": ("translation", "target_languages"),
+            "TRANSLATION_GLOSSARY_PATH": ("translation", "glossary_path"),
             "TRANSLATION_MODEL_DIR": ("translation", "model_dir"),
             "TRANSLATION_MAX_LENGTH": ("translation", "max_length"),
             "TRANSLATION_NUM_BEAMS": ("translation", "num_beams"),

@@ -178,7 +178,7 @@ class AudioPreprocessorPort(ABC):
         Filters AF ffmpeg (-af "..."):
             1. highpass=f=80:order=4
             2. dcshift=0  (remueve DC offset)
-            3. aresample=16000:resampler=soxr  (si ya 16k no hace nada, pero no error)
+            3. aresample=16000:resampler=swr  (resampler incluido en FFmpeg LGPL)
             4. volume=... peak normalize a -1.5dBTP (approx)
                 Simplificado: af loudnorm=I=-16:TP=-1.5:LRA=11:print_format=none
 

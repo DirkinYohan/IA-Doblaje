@@ -77,6 +77,8 @@ class RunTranslationUseCase:
         indent: int = 2,
         ensure_ascii: bool = False,
         force_save: bool = False,
+        glossary: dict[str, dict[str, str]] | None = None,
+        cache: Any | None = None,
     ) -> TranslationResult:
         bind_context(job_id=job_id, phase="TRANSLATION", model=MODEL_LABEL_TRANSLATION_V1_LITERAL)
         t0 = time.perf_counter()
@@ -130,6 +132,22 @@ class RunTranslationUseCase:
 
         thr = self.thresholds if self.thresholds is not None else TranslationThresholds()
 
+        batch_outputs: list[str] | None = None
+        batch_fn = getattr(self.translator, "translate_batch", None)
+        if translation_performed and batch_fn is not None and glossary is None and cache is None:
+            prepared = [str(seg.get("text", "") or "") for seg in segments]
+            batch_outputs = list(
+                batch_fn(
+                    prepared,
+                    source_language=TranslationLanguageCode(source),
+                    target_language=TranslationLanguageCode(target),
+                )
+            )
+            if len(batch_outputs) != len(segments):
+                raise TranslationError(
+                    f"translate_batch devolvió {len(batch_outputs)} textos para {len(segments)} segmentos."
+                )
+
         # 6) Traducir + adaptar cada segmento (1:1, orden conservado)
         out_segments: list[TranslationSegment] = []
         global_warnings: list[str] = []
@@ -148,21 +166,26 @@ class RunTranslationUseCase:
             # Traducción (contexto NO se inyecta al modelo; se pasa a adaptación/validación)
             if translation_performed:
                 try:
-                    translated = self.translator.translate(
-                        source_text=source_text,
-                        source_language=TranslationLanguageCode(source),
-                        target_language=TranslationLanguageCode(target),
-                        context_prev=(
-                            str(segments[i - 1].get("text", "")) if i > 0 else None
-                        ),
-                        context_next=(
-                            str(segments[i + 1].get("text", ""))
-                            if i + 1 < len(segments)
-                            else None
-                        ),
-                        speaker_label=speaker,
-                        duration_ms=duration_ms,
-                    )
+                    if batch_outputs is not None:
+                        translated = batch_outputs[i]
+                    else:
+                        translated = self._translate_one(
+                            source_text=source_text,
+                            source=source,
+                            target=target,
+                            glossary=glossary,
+                            cache=cache,
+                            context_prev=(
+                                str(segments[i - 1].get("text", "")) if i > 0 else None
+                            ),
+                            context_next=(
+                                str(segments[i + 1].get("text", ""))
+                                if i + 1 < len(segments)
+                                else None
+                            ),
+                            speaker=speaker,
+                            duration_ms=duration_ms,
+                        )
                 except (TranslationError, UnsupportedLanguageError):
                     raise
                 except Exception as exc:  # noqa: BLE001
@@ -189,6 +212,7 @@ class RunTranslationUseCase:
             # Validación por segmento
             if source_text.strip() and not translated.strip():
                 seg_errors.append("translated_text vacío con source_text no vacío")
+                seg_errors.append("source_preserved_after_failure")
             if source_text.strip() and not adapted.strip():
                 seg_errors.append("adapted_text vacío con source_text no vacío")
             if end_ms <= start_ms:
@@ -308,6 +332,69 @@ class RunTranslationUseCase:
                 "deterministic": bool(result.validation.deterministic),
             },
         }
+
+
+    def _translate_one(
+        self,
+        *,
+        source_text: str,
+        source: str,
+        target: str,
+        glossary: dict[str, dict[str, str]] | None,
+        cache: Any | None,
+        context_prev: str | None,
+        context_next: str | None,
+        speaker: str,
+        duration_ms: int,
+    ) -> str:
+        protected, tokens = _protect_glossary(source_text, glossary, target)
+        cache_key = None
+        if cache is not None:
+            import hashlib
+
+            raw = f"{source}|{target}|{protected}|{context_prev or ''}".encode("utf-8")
+            cache_key = hashlib.sha256(raw).hexdigest()
+            hit = cache.get(cache_key)
+            if isinstance(hit, str):
+                return _restore_glossary(hit, tokens)
+        translated = self.translator.translate(
+            source_text=protected,
+            source_language=TranslationLanguageCode(source),
+            target_language=TranslationLanguageCode(target),
+            context_prev=context_prev,
+            context_next=context_next,
+            speaker_label=speaker,
+            duration_ms=duration_ms,
+        )
+        restored = _restore_glossary(str(translated), tokens)
+        if cache is not None and cache_key is not None:
+            cache.put(cache_key, restored)
+        return restored
+
+
+def _protect_glossary(
+    text: str, glossary: dict[str, dict[str, str]] | None, target: str
+) -> tuple[str, list[tuple[str, str]]]:
+    mapping = {}
+    if glossary:
+        mapping = dict(glossary.get(target) or glossary.get("*") or {})
+    tokens: list[tuple[str, str]] = []
+    out = text
+    for i, src in enumerate(sorted(mapping, key=len, reverse=True)):
+        dst = str(mapping[src])
+        if not src or src not in out:
+            continue
+        token = f"__G{i}__"
+        out = out.replace(src, token)
+        tokens.append((token, dst))
+    return out, tokens
+
+
+def _restore_glossary(text: str, tokens: list[tuple[str, str]]) -> str:
+    out = text
+    for token, dst in tokens:
+        out = out.replace(token, dst)
+    return out
 
 
 __all__ = ["RunTranslationUseCase", "TRANSLATION_OUTPUT_FILENAME"]

@@ -64,17 +64,9 @@ class TorchJitModelLoader:
             # Compatibilidad: PyTorch < 2.6 no soporta weights_only en torch.jit.load;
             # en ese caso específico (TypeError por argumento no soportado) se
             # reintenta sin él. Los errores de corrupción siguen propagando ModelLoadError.
-            try:
-                model = torch.jit.load(  # type: ignore[attr-defined]
-                    str(model_path),
-                    map_location=dev,
-                    weights_only=True,
-                )
-            except TypeError:
-                model = torch.jit.load(  # type: ignore[attr-defined]
-                    str(model_path),
-                    map_location=dev,
-                )
+            from app.infrastructure.audio.jit_loader import load_jit_confined
+
+            model = load_jit_confined(torch, Path(model_path), dev)
             # Silero v5 jit tiene un método .eval()
             if hasattr(model, "eval"):
                 model.eval()

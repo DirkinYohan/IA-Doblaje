@@ -223,19 +223,9 @@ class WhisperLidModelLoader:
 
             dev = self._device_override if self._device_override is not None else str(device)
             # map_location asegura que funciona tanto CPU como CUDA si GPU presente
-            # Compatibilidad: PyTorch < 2.6 no soporta weights_only en torch.jit.load;
-            # ante TypeError específico se reintenta sin él.
-            try:
-                model = torch.jit.load(  # type: ignore[attr-defined]
-                    str(mp),
-                    map_location=dev,
-                    weights_only=True,
-                )
-            except TypeError:
-                model = torch.jit.load(  # type: ignore[attr-defined]
-                    str(mp),
-                    map_location=dev,
-                )
+            from app.infrastructure.audio.jit_loader import load_jit_confined
+
+            model = load_jit_confined(torch, mp, dev)
             model.eval()
             try:
                 import torch as _t

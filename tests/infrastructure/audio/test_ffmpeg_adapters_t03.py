@@ -217,7 +217,11 @@ def test_resolver_ok_when_which_found_and_rc0(monkeypatch) -> None:
 def test_resolver_not_found_which_none(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.infrastructure.audio.ffmpeg_adapters.shutil.which",
-        lambda x: None,
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.audio.ffmpeg_adapters._locate_on_windows",
+        lambda _name: None,
     )
     ok, msg, ver = SubprocessFFmpegBinaryResolver().resolve("ffmpeg")
     assert ok is False

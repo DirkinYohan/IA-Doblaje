@@ -65,13 +65,11 @@ def main_callback(
         callback=_version_callback,
         is_eager=True,
         expose_value=False,
-        is_flag=True,
         help="Mostrar version y salir.",
     ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
-        is_flag=True,
         help="Salida detallada.",
     ),
 ) -> None:
@@ -86,8 +84,9 @@ def main_callback(
     if ctx.invoked_subcommand is None:
         _print_banner()
         console.print(
-            "[yellow]⚠️  FASE 1 EN DESARROLLO:[/yellow] "
-            "el pipeline completo de analisis estara disponible al finalizar T11.\n"
+            "[yellow]Motor de analisis listo.[/yellow] "
+            "Use [bold]analyze[/bold] sobre un archivo o levante la API con "
+            "[bold]python -m app.presentation.api[/bold].\n"
         )
         console.print(
             "[dim]En T01 estan disponibles los comandos de diagnostico y placeholders.\n"
@@ -100,7 +99,6 @@ def diagnose_cmd(
     detailed: bool = typer.Option(
         False,
         "--detailed",
-        is_flag=True,
         help="Mostrar informacion detallada del entorno.",
     ),
 ) -> None:
@@ -303,7 +301,6 @@ def analyze_cmd(
     force_save: bool = typer.Option(
         False,
         "--force-save",
-        is_flag=True,
         help="Guardar resultados incluso si Quality Analysis reporta status=failed.",
     ),
 ) -> None:
@@ -342,8 +339,19 @@ def analyze_cmd(
 
     # 3) Construir y ejecutar el pipeline
     from app.core.config import get_settings
+    from app.core.constants import DeviceType
+    from app.core.constants import QualityProfile
 
     settings = get_settings()
+    try:
+        settings.processing.profile = QualityProfile(profile.strip().lower())
+        settings.processing.device = DeviceType(device.strip().lower())
+    except ValueError as exc:
+        console.print(f"[red][FALLO][/red] Opción inválida: {exc}")
+        raise typer.Exit(code=2)
+    out = _Path(output_dir)
+    settings.paths.data_output_dir = out.resolve() if out.is_absolute() else (_Path.cwd() / out).resolve()
+    settings.paths.data_output_dir.mkdir(parents=True, exist_ok=True)
     try:
         pipeline = build_pipeline(settings=settings)
     except Exception as exc:  # noqa: BLE001
@@ -361,8 +369,18 @@ def analyze_cmd(
         console.print(f"[red][FALLO][/red] Error durante el pipeline: {type(exc).__name__}: {exc}")
         raise typer.Exit(code=5)
 
+    status = str(results.get("status") or "SUCCESS")
     console.print()
-    console.print("[green][OK][/green] Pipeline finalizado correctamente.")
+    if status == "SUCCESS":
+        console.print("[green][OK][/green] Pipeline finalizado: SUCCESS")
+    elif status == "PARTIAL":
+        console.print("[yellow][PARCIAL][/yellow] Pipeline finalizado: PARTIAL")
+        for err in results.get("translation_errors") or []:
+            console.print(f"  • {err}")
+        if results.get("subtitle_error"):
+            console.print(f"  • subtítulos: {results.get('subtitle_error')}")
+    else:
+        console.print(f"[red][FALLO][/red] Pipeline finalizado: {status}")
     console.print(f"  • Job ID   : {results.get('media_prep').job_id}")
     console.print(f"  • Output   : {settings.paths.data_output_dir / results.get('media_prep').job_id}")
     if results.get("output") is not None:
@@ -370,6 +388,10 @@ def analyze_cmd(
         console.print(f"  • JSON     : {', '.join(out.file_sha256.keys())}")
     if results.get("cleanup") is not None:
         console.print(f"  • Cleanup  : cleaned={results['cleanup'].cleaned}")
+    if status == "PARTIAL":
+        raise typer.Exit(code=6)
+    if status != "SUCCESS":
+        raise typer.Exit(code=5)
     raise typer.Exit(code=0)
 
 
@@ -382,22 +404,35 @@ def validate_cmd(
     strict: bool = typer.Option(
         True,
         "--strict/--no-strict",
-        is_flag=True,
         help="Modo estricto (marca warnings como errores).",
     ),
 ) -> None:
     """Validar un JSON de analisis existente contra el schema.
 
-    [yellow]⚠️  Implementacion completa en T08 junto a ValidationService.[/yellow]
     """
     _print_banner()
-    console.print(f"[bold]Validar JSON:[/bold] {analysis_json}")
-    console.print(f"[bold]Modo estricto:[/bold] {strict}")
-    console.print()
-    console.print(
-        "[yellow]📌 Estado (T01):[/yellow] ValidationService Pydantic schema + Sanity checks "
-        "se implementan en T08 de la Fase 1."
-    )
+    from pathlib import Path as _Path
+    import json
+
+    path = _Path(analysis_json)
+    if not path.is_file():
+        console.print(f"[red][FALLO][/red] No existe: {analysis_json}")
+        raise typer.Exit(code=2)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        console.print(f"[red][FALLO][/red] JSON inválido: {exc}")
+        raise typer.Exit(code=2)
+    required = ("job_id", "schema_version")
+    missing = [key for key in required if key not in data]
+    if missing:
+        console.print(f"[red][FALLO][/red] Faltan claves: {', '.join(missing)}")
+        raise typer.Exit(code=2)
+    level = str(((data.get("quality") or {}) if isinstance(data.get("quality"), dict) else {}).get("quality_level", ""))
+    if strict and level == "failed":
+        console.print("[red][FALLO][/red] quality_level=failed")
+        raise typer.Exit(code=2)
+    console.print(f"[green][OK][/green] JSON válido: {path}")
 
 
 if __name__ == "__main__":  # pragma: no cover

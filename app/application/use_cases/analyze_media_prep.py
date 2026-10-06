@@ -68,6 +68,7 @@ class AnalyzeMediaPrepUseCase:
         logger: Any | None = None,
         force_keep_temp: bool = False,
         strict: bool = True,
+        progress_cb: Any | None = None,
     ) -> MediaPrepResult:
         """Ejecuta Steps 01 → 02 → 03.
 
@@ -81,10 +82,20 @@ class AnalyzeMediaPrepUseCase:
             strict: Si True (default), cualquier error raisea. Si False,
                 devuelve MediaPrepResult con errors[] poblados y None en pasos
                 no completados. Útil para diagnóstico CLI.
+            progress_cb: Callable opcional ``(step_name) -> None`` invocado antes
+                de cada subpaso real, para que la UI no se quede congelada.
 
         Returns:
             MediaPrepResult frozen con todos los metadatos de Steps 01-03.
         """
+
+        def _emit(step: str) -> None:
+            if progress_cb is None:
+                return
+            try:
+                progress_cb(step)
+            except Exception:  # noqa: BLE001
+                pass
 
         # --- 0) Settings ----------------------------------------------------
         if settings is None:
@@ -173,9 +184,16 @@ class AnalyzeMediaPrepUseCase:
                 ffmpeg=ffmpeg_ok,
                 ffprobe=ffprobe_ok,
             )
-        # Resolved paths finales
+        # Resolved paths finales. Los pasos posteriores deben usar estas rutas:
+        # el nombre suelto "ffprobe" falla si el proceso no heredó el PATH nuevo.
         ffmpeg_bin: str = ffmpeg_path_or_err if ffmpeg_ok else ""
         ffprobe_bin: str = ffprobe_path_or_err if ffprobe_ok else ""
+        ffmpeg_cfg = ffmpeg_cfg.model_copy(
+            update={
+                "ffmpeg_bin": ffmpeg_bin or ffmpeg_cfg.ffmpeg_bin,
+                "ffprobe_bin": ffprobe_bin or ffmpeg_cfg.ffprobe_bin,
+            }
+        )
 
         # Step times dict
         t0 = time.perf_counter()
@@ -193,6 +211,7 @@ class AnalyzeMediaPrepUseCase:
             # Step 01: Media Validation (FFprobe)
             # ----------------------------------------------------------------
             t1_start = time.perf_counter()
+            _emit("T01_MEDIA_VALIDATION")
 
             # PathManager: anti path traversal
             safe_resolved: Path = pm.resolve_input_path(input_path)
@@ -228,6 +247,7 @@ class AnalyzeMediaPrepUseCase:
             # Step 02: Audio Extraction (FFmpeg)
             # ----------------------------------------------------------------
             t2_start = time.perf_counter()
+            _emit("T02_AUDIO_EXTRACTION")
             extracted = self.extractor.extract(
                 validated=validated,
                 job_temp_root=job_temp_root,
@@ -241,6 +261,7 @@ class AnalyzeMediaPrepUseCase:
             # Step 03: Audio Preprocessing (FFmpeg)
             # ----------------------------------------------------------------
             t3_start = time.perf_counter()
+            _emit("T03_AUDIO_PREPROCESSING")
             preprocessed = self.preprocessor.preprocess(
                 extracted=extracted,
                 job_temp_root=job_temp_root,

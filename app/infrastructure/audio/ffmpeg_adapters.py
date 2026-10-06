@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -101,7 +102,7 @@ class SubprocessFFmpegBinaryResolver:
         if not bin_name or not isinstance(bin_name, str) or not bin_name.strip():
             return (False, f"bin_name invalido: {bin_name!r}", "")
 
-        which_path = shutil.which(bin_name.strip())
+        which_path = _locate_binary(bin_name.strip())
         if not which_path:
             msg = (
                 f"No se encontró el binario {bin_name!r} en PATH del sistema. "
@@ -111,7 +112,8 @@ class SubprocessFFmpegBinaryResolver:
             )
             return (False, msg, "")
 
-        abs_bin: str = which_path
+        located = Path(which_path)
+        abs_bin: str = str(located.resolve()) if located.is_symlink() else which_path
         try:
             cp = subprocess.run(
                 [abs_bin, "-version"],
@@ -137,6 +139,44 @@ class SubprocessFFmpegBinaryResolver:
         stdout = (cp.stdout or "").strip() if isinstance(cp.stdout, str) else (cp.stdout or b"").decode("utf-8", errors="replace").strip()
         first_line = stdout.splitlines()[0] if stdout else ""
         return (True, abs_bin, first_line[:80].strip())
+
+
+def _locate_binary(bin_name: str) -> str | None:
+    """Busca el binario en el PATH del proceso y, en Windows, en el PATH ya guardado."""
+    found = shutil.which(bin_name)
+    if found:
+        return found
+    if os.name != "nt":
+        return None
+    return _locate_on_windows(bin_name)
+
+
+def _locate_on_windows(bin_name: str) -> str | None:
+    exe = bin_name if bin_name.lower().endswith(".exe") else f"{bin_name}.exe"
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        direct = Path(local) / "Microsoft" / "WinGet" / "Links" / exe
+        if direct.is_file():
+            return str(direct)
+    try:
+        import winreg
+    except ImportError:
+        return None
+    folders: list[str] = []
+    for hive, subkey in (
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+    ):
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                raw, _kind = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        if isinstance(raw, str):
+            folders.extend(os.path.expandvars(part).strip().strip('"') for part in raw.split(";") if part.strip())
+    if not folders:
+        return None
+    return shutil.which(exe, path=os.pathsep.join(folders))
 
 
 # ---------------------------------------------------------------------------
@@ -632,11 +672,11 @@ class FFmpegAudioPreprocessor(AudioPreprocessorPort):
         timeout_s = int(getattr(ffmpeg_cfg, "ffmpeg_timeout_sec", 7200))
         null_dst = "nul" if __import__("sys").platform.startswith("win") else "/dev/null"
 
-        # ----- SUBPASO A: Highpass + DC removal + resample a 16k SOXR (sin loudnorm)
+        # swr viene en FFmpeg LGPL. soxr no está en la build essentials.
         af_pre: str = (
             "highpass=f=80:poles=2,"
             "dcshift=0,"
-            "aresample=16000:resampler=soxr"
+            f"aresample={int(target_sr)}:resampler=swr"
         )
         cmd_pre: list[str] = [
             ffmpeg_bin_path,

@@ -226,22 +226,26 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
     ) -> list[tuple[float, float, str]]:
         import numpy as np
         import torch
-        import torchaudio
+
+        # 0) WAV por soundfile: no depende de torchcodec/FFmpeg compartido.
+        from app.infrastructure.audio.wav_io import read_wav_as_tensor
+
+        pcm, sr = read_wav_as_tensor(wav_path, mono=True, scale_int16=False)
+        if sr != sample_rate:
+            import torchaudio
+
+            pcm = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(pcm)
+        pcm = pcm.to(torch.float)
 
         # 1) VAD Silero sobre el WAV (activity/segmentation)
-        from silero_vad import get_speech_timestamps, read_audio
+        from silero_vad import get_speech_timestamps
 
-        wav_for_vad = read_audio(wav_path)
-        vad_segments = get_speech_timestamps(wav_for_vad, self._get_vad_model(), return_seconds=True)
+        # Silero v5 espera escala int16 en float32.
+        vad_segments = get_speech_timestamps(
+            pcm, self._get_vad_model(), return_seconds=True, sampling_rate=sample_rate
+        )
         if not vad_segments:
             return []
-
-        pcm, sr = torchaudio.load(wav_path, normalize=False)
-        if sr != sample_rate:
-            pcm = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(pcm)
-        if pcm.size(0) > 1:
-            pcm = pcm.mean(dim=0, keepdim=True)
-        pcm = pcm.to(torch.float)
 
         from pyannote.audio import Inference
 

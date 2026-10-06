@@ -166,6 +166,13 @@ class ValidationFailedError(PipelineError):
     status_code = 422
 
 
+class PipelineCancelled(PipelineError):
+    """El usuario canceló el job entre pasos."""
+
+    code = "PIPELINE_CANCELLED"
+    status_code = 409
+
+
 class ProfileDowngradeRequired(PipelineError):
     """Excepcion PUNTO 2.
 

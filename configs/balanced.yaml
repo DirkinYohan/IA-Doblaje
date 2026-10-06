@@ -1,37 +1,18 @@
-# =============================================================================
-# PERFIL BALANCED (PUNTO 6 - DEFAULT)
-# =============================================================================
-# Whisper-PyTorch medium FP16. Compromiso precision / velocidad.
-# VRAM Requerida: ~5 GB (ver profile_vram.balanced_required_gb)
-# Destino: Uso diario / pre-produccion / QA / batches medianos.
-# =============================================================================
+# Perfil balanced (default). Mismo modelo local small, más beam.
 processing:
   profile: balanced
   device: auto
   force_cpu: false
 
 asr:
-  adapter: whisper-pytorch
-  model_name: medium
-  compute_type: float16
+  adapter: faster-whisper
+  model_name: small
+  model_folder: whisper_small_ct2_int8_fp16_local_v1
+  compute_type: int8_float16
   beam_size: 3
-  batch_size: 0
-  temperature: 0.0
   word_timestamps: true
+  chunk_by_vad: true
 
 diarization:
-  adapter: pyannote
-  model_name: pyannote/speaker-diarization-3.1
-  segmentation_model: pyannote/segmentation-3.0
-
-quality:
-  quality_enabled: true
-  quality_strict_mode: true
-  quality_min_score_to_save: 0.35
-
-metrics:
-  metrics_enabled: true
-  metrics_track_step_timings: true
-  metrics_track_memory_peak: true
-  metrics_track_gpu_util: true
-  metrics_poll_interval_ms: 250
+  adapter: wespeaker
+  model_name: pyannote/wespeaker-voxceleb-resnet34-LM

@@ -98,6 +98,14 @@ class AsrThresholds(BaseModel):
         default=True,
         description="Cuando VadResult.num_intervals==0, retornar silent fallback (True).",
     )
+    word_timestamps: bool = Field(
+        default=False,
+        description="Pedir timestamps por palabra al decoder.",
+    )
+    chunk_by_vad: bool = Field(
+        default=False,
+        description="Transcribir cada intervalo de voz en lugar del WAV completo.",
+    )
 
 
 ASRStrategyName = Literal["full_audio", "only_voice_concat", "asr_silent_fallback"]

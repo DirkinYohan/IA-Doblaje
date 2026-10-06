@@ -76,7 +76,27 @@ class M2M100TranslationModelLoader(TranslationModelLoaderPort):
         return d
 
     def load(self) -> Any:
-        """Carga modelo + tokenizer local. Devuelve (model, tokenizer)."""
+        """Carga modelo + tokenizer local. Devuelve (model, tokenizer).
+
+        Se reintenta una vez desde cero: en procesos largos el estado global de
+        torch puede quedar alterado y la primera carga falla con errores
+        crípticos del backend. Un reintento limpio evita perder la traducción
+        por un fallo transitorio.
+        """
+        try:
+            return self._load_once()
+        except ModelLoadError:
+            self._forget_cached()
+            return self._load_once()
+
+    @staticmethod
+    def _forget_cached() -> None:
+        global _LAZY_MODEL, _LAZY_TOKENIZER, _LAZY_LOADED_PATH
+        _LAZY_MODEL = None
+        _LAZY_TOKENIZER = None
+        _LAZY_LOADED_PATH = None
+
+    def _load_once(self) -> Any:
         global _LAZY_MODEL, _LAZY_TOKENIZER, _LAZY_LOADED_PATH
         d = self.validate()
         d_str = str(d)
@@ -142,12 +162,7 @@ class M2M100TranslatorAdapter(TranslatorPort):
         speaker_label: str | None = None,
         duration_ms: int | None = None,
     ) -> str:
-        """Traduce source_text al target_language (1:1, no usa contexto en el prompt).
-
-        Si la salida del modelo es degenerada (M2M100 falla con textos muy
-        cortos/interjecciones), devuelve el texto fuente como traducción segura
-        en lugar de emitir salida corrupta (regla: nunca sacrificar significado).
-        """
+        """Traduce source_text. Una salida degenerada es un error, no el texto fuente."""
         text = str(source_text).strip()
         if not text:
             return ""
@@ -174,12 +189,59 @@ class M2M100TranslatorAdapter(TranslatorPort):
                 f"Error de traducción M2M100 ({source_language}->{target_language}): {exc!r}"
             ) from exc
 
-        # Detección de salida degenerada (M2M100 con inputs ultra-cortos):
-        # repetición de un mismo carácter o ausencia total de letras.
         if self._is_degenerate(out):
-            return text  # fallback seguro: conserva el significado del original
+            from app.core.exceptions import TranslationError
 
+            raise TranslationError(
+                "Salida degenerada de M2M100. No se sustituye por el texto original."
+            )
         return out
+
+    def translate_batch(
+        self,
+        texts: list[str],
+        *,
+        source_language: TranslationLanguageCode,
+        target_language: TranslationLanguageCode,
+    ) -> list[str]:
+        """Traduce un lote del mismo par de idiomas. Una sola pasada de generate."""
+        if not texts:
+            return []
+        model, tokenizer = self._get_engine()
+        tokenizer.src_lang = str(source_language)
+        encoded = tokenizer(
+            [str(t) for t in texts],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self._max_length,
+        )
+        lang_id = tokenizer.get_lang_id(str(target_language))
+        try:
+            generated = model.generate(
+                **encoded,
+                forced_bos_token_id=lang_id,
+                max_length=self._max_length,
+                num_beams=self._num_beams,
+                do_sample=self._do_sample,
+                no_repeat_ngram_size=3,
+            )
+            decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+        except Exception as exc:  # noqa: BLE001
+            from app.core.exceptions import TranslationError
+
+            raise TranslationError(f"Error de lote M2M100: {exc!r}") from exc
+        outs: list[str] = []
+        for src, hyp in zip(texts, decoded, strict=False):
+            text = str(hyp or "").strip()
+            if self._is_degenerate(text):
+                from app.core.exceptions import TranslationError
+
+                raise TranslationError(
+                    "Salida degenerada de M2M100 en lote. No se sustituye por el original."
+                )
+            outs.append(text)
+        return outs
 
     @staticmethod
     def _is_degenerate(text: str) -> bool:

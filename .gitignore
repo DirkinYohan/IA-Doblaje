@@ -108,9 +108,7 @@ docker-images*.tar
 huggingface_token
 hf_token
 
-# =============================================================================
-# OUTPUTS JSON RESULTADOS (NO COMMITEAR)
-# =============================================================================
+
 analysis.json
 transcript.json
 speakers.json

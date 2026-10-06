@@ -292,32 +292,84 @@ class RunQualityAnalysisUseCase:
             reason=f"QR06 speakers={num_speakers} aligned={alignment.num_segments_aligned} occurrences={occ}",
         )
 
-    # QR07: ASR segment confidence < 0.4 (WARNING, -0.04/segmento)
-    # No hay confianza normalizada por segmento → not applicable.
+    @staticmethod
+    def _segment_confidence(seg: Any) -> float | None:
+        raw = getattr(seg, "confidence", None)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            value = float(raw)
+            if 0.0 <= value <= 1.0:
+                return value
+        avg = getattr(seg, "avg_logprob", None)
+        if isinstance(avg, (int, float)) and not isinstance(avg, bool):
+            value = float(avg)
+            if value != value or value in (float("inf"), float("-inf")):
+                return None
+            return float(min(max((value + 6.0) / 6.0, 0.0), 1.0))
+        return None
+
+    # QR07: confianza de segmento < umbral (WARNING). N/A si no hay dato.
     @staticmethod
     def _qr07(asr_result: ASRResult, thresholds: QualityThresholds) -> QualityRuleResult:
+        confidences = [
+            c
+            for c in (
+                RunQualityAnalysisUseCase._segment_confidence(seg) for seg in asr_result.segments
+            )
+            if c is not None
+        ]
+        if not confidences:
+            return QualityRuleResult(
+                rule_code="QR07",
+                severity="WARNING",
+                passed=True,
+                applicable=False,
+                occurrences=0,
+                penalty=0.0,
+                reason="segment_level_asr_confidence_unavailable",
+            )
+        floor = float(thresholds.min_asr_segment_conf)
+        occ = sum(1 for c in confidences if c < floor)
         return QualityRuleResult(
             rule_code="QR07",
             severity="WARNING",
-            passed=True,
-            applicable=False,
-            occurrences=0,
-            penalty=0.0,
-            reason="segment_level_asr_confidence_unavailable",
+            passed=occ == 0,
+            applicable=True,
+            occurrences=occ,
+            penalty=min(1.0, float(thresholds.penalty_low_conf_segment) * occ),
+            reason=f"QR07 segment_confidence<{floor} occurrences={occ}",
         )
 
-    # QR08: palabra confidence < 0.30 (WARNING, -0.005/palabra)
-    # T07 WORD_TS_APLAZADO → not applicable.
+    # QR08: confianza de palabra < umbral (WARNING). N/A si no hay palabras.
     @staticmethod
     def _qr08(asr_result: ASRResult, thresholds: QualityThresholds) -> QualityRuleResult:
+        word_conf: list[float] = []
+        for seg in asr_result.segments:
+            for word in getattr(seg, "words", ()) or ():
+                raw = getattr(word, "confidence", None)
+                if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                    value = float(raw)
+                    if 0.0 <= value <= 1.0:
+                        word_conf.append(value)
+        if not word_conf:
+            return QualityRuleResult(
+                rule_code="QR08",
+                severity="WARNING",
+                passed=True,
+                applicable=False,
+                occurrences=0,
+                penalty=0.0,
+                reason="word_level_confidence_unavailable",
+            )
+        floor = float(thresholds.min_word_conf)
+        occ = sum(1 for c in word_conf if c < floor)
         return QualityRuleResult(
             rule_code="QR08",
             severity="WARNING",
-            passed=True,
-            applicable=False,
-            occurrences=0,
-            penalty=0.0,
-            reason="word_level_confidence_unavailable",
+            passed=occ == 0,
+            applicable=True,
+            occurrences=occ,
+            penalty=min(1.0, float(thresholds.penalty_low_conf_word) * occ),
+            reason=f"QR08 word_confidence<{floor} occurrences={occ}",
         )
 
     # QR09: segmentos > max_segment_sec (WARNING, -0.02/caso)

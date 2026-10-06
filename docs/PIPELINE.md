@@ -91,3 +91,46 @@
 - Determinismo: `do_sample=False`, `num_beams=1`
 - Se ejecuta tras T13 y antes de T14; T14 no elimina los outputs persistidos
 - `DEV_KEEP_TEMP_FILES=true` para debugging
+
+---
+
+## Procesamiento progresivo (subtítulos mientras se procesa)
+
+Además del pipeline completo T01→T15, existe un modo **progresivo** pensado
+para que el usuario pueda reproducir el vídeo mientras la IA trabaja.
+
+Flujo:
+
+```text
+SUBIR VÍDEO  ->  READY (no se procesa todavía)
+      |
+      v
+"PRODUCIR"  ->  job en segundo plano
+      |
+      v
+por ventanas de 30 s (solape 1 s): VAD -> ASR -> cues -> traducción -> DB
+      |
+      v
+eventos en tiempo real (WebSocket /api/jobs/{id}/events)
+      |
+      v
+subtítulos aparecen conforme se generan  ->  COMPLETED / PARTIAL
+```
+
+Diferencias con el pipeline completo:
+
+| | Progresivo | Completo |
+|---|---|---|
+| Publica subtítulos | por ventana (30 s) | al terminar |
+| Diarización | no (más rápido) | sí |
+| Calidad/validación/métricas | no | sí |
+| Eventos en vivo | `subtitle_created`, `processing_progress` | sólo progreso |
+| Uso | reproducción inmediata | análisis profundo |
+
+Puntos clave de la implementación:
+
+* El audio original **no se modifica**: se extrae un WAV temporal a 16 kHz mono.
+* El worker es independiente del reproductor: pausar el vídeo no lo detiene.
+* El estado real está en SQLite; el WebSocket sólo evita el sondeo.
+* Un fallo de traducción deja la pista vacía pero marca el trabajo como
+  `PARTIAL` con la causa, nunca como éxito total.

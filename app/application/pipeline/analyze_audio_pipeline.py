@@ -7,6 +7,7 @@ NO modifica resultados upstream. T14 se ejecuta en `finally`.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from app.application.use_cases.write_structured_json import RunStructuredJsonOut
 from app.core.config import AppSettings, get_settings
 from app.core.constants import JSON_SCHEMA_VERSION
 from app.core.exceptions import EngineBaseError
+from app.core.exceptions import PipelineCancelled
 from app.core.logging import bind_context, get_logger
 from app.core.paths import PathManager, generate_job_id
 from app.domain.entities.alignment import AlignmentResult
@@ -66,6 +68,9 @@ class AnalyzeAudioPipeline:
     path_manager: PathManager
     step_times: dict[str, float] = field(default_factory=dict)
     translation: Any | None = None  # RunTranslationUseCase (T15) — opcional
+    cancel_event: Any | None = None
+    progress_callback: Any | None = None
+    asr_device: str = "cpu"
 
     # ------------------------------------------------------------------
     # PUBLIC
@@ -99,7 +104,12 @@ class AnalyzeAudioPipeline:
             # T01–T03
             results["media_prep"] = self._run_step(
                 "T01_T02_T03",
-                lambda: self.media_prep.execute(input_path, job_id=jid, settings=self.settings),
+                lambda: self.media_prep.execute(
+                    input_path,
+                    job_id=jid,
+                    settings=self.settings,
+                    progress_cb=lambda step: self._notify(step, 0.0, "start"),
+                ),
             )
 
             media_prep: MediaPrepResult = results["media_prep"]
@@ -116,6 +126,8 @@ class AnalyzeAudioPipeline:
                 "T05_LID",
                 lambda: self.language.execute(media_prep, results["vad"], job_id=jid),
             )
+            # Idioma realmente detectado (para persistirlo en el proyecto).
+            results["detected_language"] = _detected_language_code(results["language"])
 
             # T06 ASR
             results["asr"] = self._run_step(
@@ -216,38 +228,95 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T15 Translation Engine (después de T13, antes de T14)
+            # T15 + subtítulos. Un fallo aquí es PARTIAL, nunca SUCCESS.
+            results["translation_errors"] = []
+            results["translations"] = []
             if self.translation is not None:
-                try:
-                    results["translation"] = self._run_step(
-                        "T15_TRANSLATION",
-                        lambda: self.translation.run(
-                            segments_path=str(
-                                self.path_manager.data_output_dir / jid / "segments.json"
-                            ),
-                            transcript_path=str(
-                                self.path_manager.data_output_dir / jid / "transcript.json"
-                            ),
-                            output_directory=output_dir,
-                            target_language=str(
-                                getattr(
-                                    self.settings.translation,
-                                    "target_language",
-                                    "es",
-                                )
-                            ),
-                            schema_version=JSON_SCHEMA_VERSION,
-                            job_id=jid,
-                            indent=int(output_cfg.output_json_indent),
-                            ensure_ascii=bool(output_cfg.output_json_ensure_ascii),
-                            force_save=force_save,
-                        ),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # T15 no debe romper T01–T14 ni T14: loguear y continuar
-                    log.error("t15_translation_failed", extra={"error": str(exc)})
-                    results["translation"] = None
+                glossary, glossary_error = _load_glossary(
+                    str(getattr(self.settings.translation, "glossary_path", "") or "")
+                )
+                if glossary_error:
+                    results["translation_errors"].append(glossary_error)
+                cache = None
+                if not glossary_error:
+                    from app.infrastructure.translation.translation_cache import JsonTranslationCache
 
+                    cache = JsonTranslationCache(
+                        Path(self.settings.paths.data_output_dir).parent / "cache" / "translation.json"
+                    )
+                targets = [] if glossary_error else list(self.settings.translation.targets)
+                for target in targets:
+                    try:
+                        translated = self._run_step(
+                            f"T15_TRANSLATION_{target}",
+                            lambda target=target: self.translation.run(
+                                segments_path=str(
+                                    self.path_manager.data_output_dir / jid / "segments.json"
+                                ),
+                                transcript_path=str(
+                                    self.path_manager.data_output_dir / jid / "transcript.json"
+                                ),
+                                output_directory=output_dir,
+                                target_language=target,
+                                schema_version=JSON_SCHEMA_VERSION,
+                                job_id=jid,
+                                indent=int(output_cfg.output_json_indent),
+                                ensure_ascii=bool(output_cfg.output_json_ensure_ascii),
+                                force_save=force_save,
+                                glossary=glossary,
+                                cache=cache,
+                            ),
+                        )
+                        results["translations"].append(translated)
+                        if getattr(getattr(translated, "validation", None), "ok", True) is False:
+                            results["translation_errors"].append(
+                                f"{target}:validation_failed"
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        log.error("t15_translation_failed", extra={"error": str(exc), "target": target})
+                        results["translation_errors"].append(f"{target}:{exc}")
+                results["translation"] = (
+                    results["translations"][-1] if results["translations"] else None
+                )
+            else:
+                results["translation"] = None
+
+            try:
+                if self.progress_callback is not None:
+                    self._notify("GENERATING_SUBTITLES", 0.0, "start")
+                from app.application.use_cases.build_subtitles import (
+                    build_cues_from_alignment,
+                    write_subtitle_exports,
+                )
+
+                cues = build_cues_from_alignment(
+                    results["alignment"],
+                    language=str(getattr(results["alignment"], "transcript_language_code", "und")),
+                )
+                results["subtitles"] = cues
+                if cues:
+                    write_subtitle_exports(output_dir, cues, language=cues[0].language)
+                for translated in results["translations"]:
+                    tcues = build_cues_from_alignment(
+                        results["alignment"],
+                        language=str(translated.target_language),
+                        text_by_index={
+                            int(seg.segment_index): str(seg.adapted_text)
+                            for seg in translated.segments
+                        },
+                    )
+                    if tcues:
+                        write_subtitle_exports(
+                            output_dir, tcues, language=str(translated.target_language)
+                        )
+            except Exception as exc:  # noqa: BLE001
+                log.error("subtitle_export_failed", extra={"error": str(exc)})
+                results["subtitle_error"] = str(exc)
+
+            if results["translation_errors"] or results.get("subtitle_error"):
+                results["status"] = "PARTIAL"
+            else:
+                results["status"] = "SUCCESS"
             return results
 
         finally:
@@ -269,16 +338,32 @@ class AnalyzeAudioPipeline:
     # HELPERS
     # ------------------------------------------------------------------
 
+    def _notify(self, step_name: str, elapsed: float, phase: str) -> None:
+        """Notifica progreso. Admite callbacks de 2 (compat) o 3 argumentos."""
+        if self.progress_callback is None:
+            return
+        try:
+            self.progress_callback(step_name, elapsed, phase)
+        except TypeError:
+            self.progress_callback(step_name, elapsed)
+
     def _run_step(self, step_name: str, fn: Any) -> Any:
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise PipelineCancelled("Procesamiento cancelado por el usuario.")
         t0 = time.perf_counter()
+        # El trabajo pesado ocurre dentro de fn(): anunciar el INICIO permite
+        # que la UI muestre la etapa real mientras se ejecuta.
+        self._notify(step_name, 0.0, "start")
         try:
             result = fn()
             self.step_times[step_name] = round(time.perf_counter() - t0, 6)
             log.info("pipeline_step_ok", extra={"step": step_name, "elapsed_sec": self.step_times[step_name]})
+            self._notify(step_name, self.step_times[step_name], "done")
             return result
         except Exception as exc:  # noqa: BLE001
             self.step_times[step_name] = round(time.perf_counter() - t0, 6)
             log.error("pipeline_step_failed", extra={"step": step_name, "error": str(exc)})
+            self._notify(step_name, self.step_times[step_name], "error")
             raise
 
     def _build_runtime_snapshot(
@@ -316,20 +401,23 @@ class AnalyzeAudioPipeline:
             _STEP_NAME_MAP.get(k, k): v for k, v in self.step_times.items()
         }
 
+        from app.infrastructure.metrics.runtime_probe import probe_runtime
+
+        probed = probe_runtime(self.asr_device)
         return RuntimeMetricsSnapshot(
             processing_wall_time_sec=max(0.0, wall),
             step_timings_sec=step_timings,
-            peak_cpu_rss_mb=0.0,
-            peak_gpu_vram_used_mb=0.0,
-            peak_gpu_vram_total_mb=0.0,
-            cpu_utilization_avg_percent=0.0,
-            gpu_utilization_avg_percent=0.0,
+            peak_cpu_rss_mb=float(probed["rss_mb"]),
+            peak_gpu_vram_used_mb=float(probed["vram_used_mb"]),
+            peak_gpu_vram_total_mb=float(probed["vram_total_mb"]),
+            cpu_utilization_avg_percent=float(probed["cpu_percent"]),
+            gpu_utilization_avg_percent=float(probed["gpu_percent"]),
             profile_requested=str(getattr(self.settings.processing, "profile", "")),
             profile_applied=str(getattr(self.settings.processing, "profile", "")),
             profile_downgrade_applied=False,
             profile_downgrade_reason="",
             device_requested=str(getattr(self.settings.processing, "device", "")),
-            device_used="cpu",
+            device_used=str(probed["device"]),
         )
 
 
@@ -368,7 +456,28 @@ def build_pipeline(
     language = RunLanguageDetectionUseCase(
         detector=WhisperEncoderLanguageDetectionAdapter(settings=settings)
     )
-    asr = RunASRUseCase(asr_port=FasterWhisperSmallASRAdapter(compute_type="int8"))
+    from app.core.profile_loader import load_asr_profile
+    from app.core.profile_loader import resolve_compute_type
+    from app.domain.value_objects.asr import AsrThresholds
+
+    profile_name = str(getattr(settings.processing.profile, "value", settings.processing.profile))
+    spec = load_asr_profile(profile_name, settings.paths.configs_dir)
+    device_name = _resolve_asr_device(settings)
+    compute_type, compute_note = resolve_compute_type(spec.compute_type, device_name)
+    if compute_note:
+        log.info("compute_type_adjusted", extra={"note": compute_note, "device": device_name})
+    asr = RunASRUseCase(
+        asr_port=FasterWhisperSmallASRAdapter(
+            compute_type=compute_type,
+            model_folder=spec.model_folder,
+            device_resolver=lambda: device_name,
+        ),
+        default_thresholds=AsrThresholds(
+            beam_size=int(spec.beam_size),
+            word_timestamps=bool(spec.word_timestamps),
+            chunk_by_vad=bool(spec.chunk_by_vad),
+        ),
+    )
     timestamps = GenerateTimestampsUseCase(
         timestamp_normalizer=_build_timestamp_normalizer()
     )
@@ -429,7 +538,57 @@ def build_pipeline(
         settings=settings,
         path_manager=pm,
         translation=translation,
+        asr_device=device_name,
     )
+
+
+def _resolve_asr_device(settings: AppSettings) -> str:
+    requested = str(getattr(settings.processing.device, "value", settings.processing.device)).lower()
+    if bool(getattr(settings.processing, "force_cpu", False)) or requested == "cpu":
+        return "cpu"
+    try:
+        import torch
+
+        if requested in {"auto", "cuda"} and torch.cuda.is_available():
+            return "cuda"
+        if requested in {"auto", "mps"} and getattr(torch.backends, "mps", None) is not None:
+            if torch.backends.mps.is_available():
+                return "mps"
+    except Exception:
+        return "cpu"
+    return "cpu"
+
+
+def _load_glossary(path: str) -> tuple[dict[str, dict[str, str]] | None, str | None]:
+    raw_path = path.strip()
+    if not raw_path:
+        return None, None
+    file_path = Path(raw_path)
+    if not file_path.is_file():
+        return None, f"glossary:no existe {file_path}"
+    try:
+        loaded = json.loads(file_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, f"glossary:{exc}"
+    if not isinstance(loaded, dict):
+        return None, "glossary:se esperaba un objeto JSON"
+    glossary: dict[str, dict[str, str]] = {}
+    for language, mapping in loaded.items():
+        if not isinstance(mapping, dict):
+            return None, f"glossary:{language} no es un objeto"
+        glossary[str(language)] = {str(term): str(value) for term, value in mapping.items()}
+    return glossary, None
+
+
+def _detected_language_code(lid: Any) -> str:
+    """Extrae el código ISO del idioma detectado por T05. '' si no es fiable."""
+    raw = getattr(lid, "language_code", None)
+    if raw is None and isinstance(lid, dict):
+        raw = lid.get("language_code")
+    value = str(getattr(raw, "value", raw) or "").strip().lower()
+    if not value or value == "und":
+        return ""
+    return value
 
 
 def _build_timestamp_normalizer() -> Any:

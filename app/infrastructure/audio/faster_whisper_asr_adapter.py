@@ -52,17 +52,130 @@ FOLDER_MIN_SIZE_BYTES = 50_000_000  # 50 MB approx min
 FOLDER_MAX_SIZE_BYTES = 5_000_000_000  # 5 GB max safety
 
 
+def _as_mono_f32(np_mod: Any, audio: Any, sr_read: int) -> Any:
+    if int(sr_read) != 16000:
+        raise ASRProcessingError(f"WAV sample_rate={sr_read} != 16000")
+    audio_f32 = audio.astype(np_mod.float32, copy=False) / 32768.0
+    audio_f32 = np_mod.nan_to_num(audio_f32, nan=0.0, posinf=1.0, neginf=-1.0, copy=False)
+    if getattr(audio_f32, "ndim", 1) == 2:
+        if audio_f32.shape[1] == 0:
+            raise ASRProcessingError("WAV 2D sin canales")
+        audio_f32 = audio_f32.mean(axis=1, dtype=np_mod.float32)
+    return audio_f32
+
+
+def _read_wav_full(sf_mod: Any, np_mod: Any, wav_path: Any) -> Any:
+    try:
+        audio, sr_read = sf_mod.read(str(wav_path), dtype="int16", always_2d=False)
+    except Exception as exc:  # noqa: BLE001
+        raise ASRProcessingError(
+            f"No se pudo leer WAV {wav_path}: {type(exc).__name__}: {exc}"
+        ) from exc
+    return _as_mono_f32(np_mod, audio, int(sr_read))
+
+
+def _read_wav_window(
+    sf_mod: Any,
+    np_mod: Any,
+    wav_path: Any,
+    start_ms: int,
+    end_ms: int,
+    pad_ms: int = 120,
+) -> tuple[Any, int]:
+    """Lee solo la ventana de voz. Devuelve (float32, offset_ms de la ventana)."""
+    try:
+        with sf_mod.SoundFile(str(wav_path)) as handle:
+            sr = int(handle.samplerate)
+            if sr != 16000:
+                raise ASRProcessingError(f"WAV sample_rate={sr} != 16000")
+            origin = max(0, int(start_ms) - int(pad_ms))
+            stop = int(end_ms) + int(pad_ms)
+            start_frame = max(0, int(origin * sr / 1000))
+            stop_frame = min(len(handle), max(start_frame + 1, int(stop * sr / 1000)))
+            handle.seek(start_frame)
+            audio = handle.read(stop_frame - start_frame, dtype="int16", always_2d=False)
+    except ASRProcessingError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ASRProcessingError(
+            f"No se pudo leer ventana WAV {wav_path}: {type(exc).__name__}: {exc}"
+        ) from exc
+    offset_ms = int(round(start_frame * 1000 / sr))
+    return _as_mono_f32(np_mod, audio, sr), offset_ms
+
+
+def _segment_from_raw(raw_seg: Any, index: int, offset_ms: int) -> Any:
+    from app.domain.entities.asr import ASRSegment
+    from app.domain.entities.asr import ASRWord
+
+    text = getattr(raw_seg, "text", None)
+    if not isinstance(text, str):
+        text = ""
+    text = text.strip("\x00")
+
+    def _ms(value: Any) -> int | None:
+        if isinstance(value, (int, float)) and float("-inf") < float(value) < float("inf"):
+            scaled = int(round(float(value) * 1000.0)) + int(offset_ms)
+            return scaled if scaled >= 0 else 0
+        return None
+
+    start_ms = _ms(getattr(raw_seg, "start", None))
+    end_ms = _ms(getattr(raw_seg, "end", None))
+    if start_ms is not None and end_ms is not None and end_ms < start_ms:
+        end_ms = start_ms
+    avg_lp = getattr(raw_seg, "avg_logprob", None)
+    avg_logprob_val: float | None = None
+    confidence: float | None = None
+    if isinstance(avg_lp, (int, float)) and float("-inf") < float(avg_lp) < float("inf"):
+        avg_logprob_val = float(avg_lp)
+        confidence = float(min(max((avg_logprob_val + 6.0) / 6.0, 0.0), 1.0))
+    no_speech_p = getattr(raw_seg, "no_speech_prob", None)
+    no_speech_val: float | None = None
+    if isinstance(no_speech_p, (int, float)):
+        ns = float(no_speech_p)
+        if 0.0 <= ns <= 1.0:
+            no_speech_val = ns
+    words: list[Any] = []
+    for raw_word in getattr(raw_seg, "words", None) or ():
+        wtext = str(getattr(raw_word, "word", "") or "").strip("\x00").strip()
+        wstart = _ms(getattr(raw_word, "start", None))
+        wend = _ms(getattr(raw_word, "end", None))
+        if not wtext or wstart is None or wend is None:
+            continue
+        if wend < wstart:
+            wend = wstart
+        prob = getattr(raw_word, "probability", None)
+        wconf = float(prob) if isinstance(prob, (int, float)) and 0.0 <= float(prob) <= 1.0 else None
+        words.append(ASRWord(text=wtext, start_ms=wstart, end_ms=wend, confidence=wconf))
+    return ASRSegment(
+        segment_index=index,
+        text=text,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        avg_logprob=avg_logprob_val,
+        no_speech_prob=no_speech_val,
+        confidence=confidence,
+        words=tuple(words),
+    )
+
+
 # =============================================================================
 # LOADER — Port ASRModelLoaderPort
 # =============================================================================
 class FasterWhisperLocalModelLoader:
     """Loader 100% local. Valida carpeta y contenido. SIN descargas."""
 
-    __slots__ = ("_settings_getter", "_device_getter")
+    __slots__ = ("_settings_getter", "_device_getter", "_folder_name")
 
-    def __init__(self, settings_getter: Any | None = None, device_getter: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings_getter: Any | None = None,
+        device_getter: Any | None = None,
+        folder_name: str | None = None,
+    ) -> None:
         self._settings_getter = settings_getter
         self._device_getter = device_getter
+        self._folder_name = folder_name or MODEL_FOLDERNAME
 
     # ---------------------------------------------------------------------
     # Helpers
@@ -83,7 +196,7 @@ class FasterWhisperLocalModelLoader:
 
     def _resolve_expected_folder_absolute(self) -> Path:
         models_dir = self._get_models_dir()
-        raw_path = models_dir / MODEL_FOLDERNAME
+        raw_path = models_dir / self._folder_name
         resolved = raw_path.expanduser().resolve()
         models_norm = models_dir.resolve().as_posix()
         res_norm = resolved.as_posix()
@@ -212,8 +325,9 @@ class FasterWhisperSmallASRAdapter:
         *,
         device_resolver: Any | None = None,
         compute_type: str = "int8_float16",
+        model_folder: str | None = None,
     ) -> None:
-        self._loader = loader or FasterWhisperLocalModelLoader()
+        self._loader = loader or FasterWhisperLocalModelLoader(folder_name=model_folder)
         self._cached_model: Any = None
         self._model_loaded_flag: bool = False
         self._device_resolver = device_resolver
@@ -253,6 +367,54 @@ class FasterWhisperSmallASRAdapter:
     # ---------------------------------------------------------------------
     # ASRPort.transcribe
     # ---------------------------------------------------------------------
+    def transcribe_array(
+        self,
+        audio_f32: Any,
+        *,
+        offset_ms: int = 0,
+        language: str | None = None,
+        thresholds: Any | None = None,
+        start_index: int = 0,
+    ) -> list[Any]:
+        """Transcribe un array float32 [-1,1] ya en memoria.
+
+        Primitiva del procesamiento progresivo: el llamante trocea el audio y
+        sólo se paga la carga del modelo una vez (cacheada en la instancia).
+        Devuelve segmentos de dominio con timestamps ABSOLUTOS.
+        """
+        from app.domain.value_objects.asr import AsrThresholds
+
+        if audio_f32 is None or getattr(audio_f32, "size", 0) == 0:
+            return []
+        eff_thr = thresholds if isinstance(thresholds, AsrThresholds) else AsrThresholds()
+        model = self._get_or_load_model()
+        beam_size = max(1, int(getattr(eff_thr, "beam_size", 1) or 1))
+        want_words = bool(getattr(eff_thr, "word_timestamps", False))
+        try:
+            segments_iter, _info = model.transcribe(
+                audio_f32,
+                language=language,
+                beam_size=beam_size,
+                vad_filter=False,
+                word_timestamps=want_words,
+                without_timestamps=False,
+                task="transcribe",
+                condition_on_previous_text=True,
+            )
+            raw_list = list(segments_iter)
+        except (ModelLoadError, ConfigurationError, ASRProcessingError):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ASRProcessingError(
+                f"FasterWhisperSmallASRAdapter transcribe_array error: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
+        return [
+            _segment_from_raw(raw, int(start_index) + position, int(offset_ms))
+            for position, raw in enumerate(raw_list)
+        ]
+
     def transcribe(
         self,
         preprocessed_audio: Any,
@@ -287,25 +449,9 @@ class FasterWhisperSmallASRAdapter:
                 "Chain of control corrupto."
             )
 
-        # 3) D#6 FULL AUDIO strategy: leer wav_path completo 16kHz mono int16 → float32 [-1,1]
         wav_path = getattr(preprocessed_audio, "wav_path", None)
         if wav_path is None:
             raise ASRProcessingError("PreprocessedAudio no tiene wav_path")
-        try:
-            audio_array_np_int16, sr_read = _sf.read(str(wav_path), dtype="int16", always_2d=False)
-        except Exception as exc:  # noqa: BLE001
-            raise ASRProcessingError(
-                f"No se pudo leer WAV {wav_path}: {type(exc).__name__}: {exc}"
-            ) from exc
-        if int(sr_read) != 16000:
-            raise ASRProcessingError(f"WAV sample_rate={sr_read} != 16000")
-        audio_f32 = audio_array_np_int16.astype(_np.float32, copy=False) / 32768.0
-        audio_f32 = _np.nan_to_num(audio_f32, nan=0.0, posinf=1.0, neginf=-1.0, copy=False)
-        # Mono: si soundfile devolvió 2D, promediar canales (garantiza mono aunque sea estéreo por bug)
-        if audio_f32.ndim == 2:
-            if audio_f32.shape[1] == 0:
-                raise ASRProcessingError("WAV 2D sin canales")
-            audio_f32 = audio_f32.mean(axis=1, dtype=_np.float32)
 
         # 4) Idioma: T05 language_code (si != "und") → explicit. "und" → None (auto-detect decoder)
         t05_lang_code: str = str(getattr(lid_result, "language_code", "und"))
@@ -314,22 +460,48 @@ class FasterWhisperSmallASRAdapter:
         # 5) Cargar modelo LAZY
         model = self._get_or_load_model()
 
-        # 6) Parámetros PERF obligatorios (beam=1 greedy, vad_filter=False, word_timestamps=False)
         beam_size = int(getattr(eff_thr, "beam_size", 1) or 1)
         if beam_size < 1:
             beam_size = 1
+        want_words = bool(getattr(eff_thr, "word_timestamps", False))
+        chunk_by_vad = bool(getattr(eff_thr, "chunk_by_vad", False))
+        intervals = list(getattr(vad_result, "voice_intervals", ()) or ())
+        use_chunks = chunk_by_vad and len(intervals) > 0
+        strategy = "only_voice_concat" if use_chunks else "full_audio"
+
+        pieces: list[tuple[list[Any], Any, int]] = []
         try:
-            segments_iter, info = model.transcribe(
-                audio_f32,
-                language=decoder_language,
-                beam_size=beam_size,
-                vad_filter=False,
-                word_timestamps=False,
-                without_timestamps=False,
-                task="transcribe",
-                condition_on_previous_text=True,
-            )
-            segments_list = list(segments_iter)
+            if use_chunks:
+                for interval in intervals:
+                    audio_f32, offset_ms = _read_wav_window(
+                        _sf, _np, wav_path, int(interval.start_ms), int(interval.end_ms)
+                    )
+                    if audio_f32.size == 0:
+                        continue
+                    segments_iter, info = model.transcribe(
+                        audio_f32,
+                        language=decoder_language,
+                        beam_size=beam_size,
+                        vad_filter=False,
+                        word_timestamps=want_words,
+                        without_timestamps=False,
+                        task="transcribe",
+                        condition_on_previous_text=True,
+                    )
+                    pieces.append((list(segments_iter), info, offset_ms))
+            else:
+                audio_f32 = _read_wav_full(_sf, _np, wav_path)
+                segments_iter, info = model.transcribe(
+                    audio_f32,
+                    language=decoder_language,
+                    beam_size=beam_size,
+                    vad_filter=False,
+                    word_timestamps=want_words,
+                    without_timestamps=False,
+                    task="transcribe",
+                    condition_on_previous_text=True,
+                )
+                pieces.append((list(segments_iter), info, 0))
         except (ModelLoadError, ConfigurationError, ASRProcessingError):
             raise
         except Exception as exc:  # noqa: BLE001
@@ -338,50 +510,17 @@ class FasterWhisperSmallASRAdapter:
                 f"{type(exc).__name__}: {exc}"
             ) from exc
 
-        # 7) Convertir a segmentos ASR frozen (incluir metadata cruda start_ms/end_ms, NO oficial T07)
         domain_segments: list[ASRSegment] = []
         running_avg_logprob: float = 0.0
         cnt_with_logprob = 0
-        for idx, raw_seg in enumerate(segments_list):
-            text = getattr(raw_seg, "text", None)
-            if not isinstance(text, str):
-                text = ""
-            text = text.strip("\x00")
-            start_s = getattr(raw_seg, "start", None)
-            end_s = getattr(raw_seg, "end", None)
-            start_ms: int | None = None
-            end_ms: int | None = None
-            if isinstance(start_s, (int, float)):
-                sm = int(round(float(start_s) * 1000.0))
-                if sm >= 0:
-                    start_ms = sm
-            if isinstance(end_s, (int, float)):
-                em = int(round(float(end_s) * 1000.0))
-                if em >= 0:
-                    end_ms = em
-            avg_lp = getattr(raw_seg, "avg_logprob", None)
-            no_speech_p = getattr(raw_seg, "no_speech_prob", None)
-            avg_logprob_val: float | None = None
-            no_speech_val: float | None = None
-            if isinstance(avg_lp, (int, float)):
-                if float("-inf") < float(avg_lp) < float("inf"):
-                    avg_logprob_val = float(avg_lp)
-                    running_avg_logprob += avg_logprob_val
+        info = pieces[-1][1] if pieces else None
+        for raw_list, _info, offset_ms in pieces:
+            for raw_seg in raw_list:
+                built = _segment_from_raw(raw_seg, len(domain_segments), offset_ms)
+                domain_segments.append(built)
+                if built.avg_logprob is not None:
+                    running_avg_logprob += float(built.avg_logprob)
                     cnt_with_logprob += 1
-            if isinstance(no_speech_p, (int, float)):
-                ns = float(no_speech_p)
-                if 0.0 <= ns <= 1.0:
-                    no_speech_val = ns
-            domain_segments.append(
-                ASRSegment(
-                    segment_index=idx,
-                    text=text,
-                    start_ms=start_ms,
-                    end_ms=end_ms,
-                    avg_logprob=avg_logprob_val,
-                    no_speech_prob=no_speech_val,
-                )
-            )
         num_segments = len(domain_segments)
 
         # 8) Transcript completo: concatenar texto de segmentos
@@ -412,6 +551,8 @@ class FasterWhisperSmallASRAdapter:
             "faster_whisper_language_detected": inferred_lang if isinstance(inferred_lang, str) else None,
             "faster_whisper_language_used_input": decoder_language,
             "beam_size": beam_size,
+            "word_timestamps": want_words,
+            "chunk_by_vad": use_chunks,
             "num_raw_segments_fw": num_segments,
             "segments_with_avg_logprob": cnt_with_logprob,
         }
@@ -425,7 +566,7 @@ class FasterWhisperSmallASRAdapter:
             confidence=confidence,
             segments=tuple(domain_segments),
             num_segments=num_segments,
-            strategy="full_audio",
+            strategy=strategy,
             model_label=MODEL_LABEL,
             thresholds_used=eff_thr,
             job_id=job_id,

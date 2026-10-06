@@ -30,6 +30,25 @@ from app.domain.value_objects.audio import (
 from app.domain.value_objects.lid import LidDurationMs
 
 
+class ASRWord(BaseModel):
+    """Palabra con tiempo. Opcional: solo si el decoder devolvió word timestamps."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
+
+    text: str = Field(..., max_length=500)
+    start_ms: int = Field(..., ge=0)
+    end_ms: int = Field(..., ge=0)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @field_validator("end_ms")
+    @classmethod
+    def _word_end_after_start(cls, v: int, info: ValidationInfo) -> int:
+        start = info.data.get("start_ms")
+        if isinstance(start, int) and v < start:
+            raise ValueError(f"word end_ms={v} < start_ms={start}")
+        return v
+
+
 class ASRSegment(BaseModel):
     """Segmento ASR raw de decoder Step 06 (NO son timestamps oficiales T07)."""
 
@@ -68,6 +87,16 @@ class ASRSegment(BaseModel):
     no_speech_prob: float | None = Field(
         default=None,
         description="no_speech_prob raw Faster-Whisper rango [0,1] (probabilidad de no habla).",
+    )
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confianza normalizada [0,1] del segmento. None si el decoder no la dio.",
+    )
+    words: tuple[ASRWord, ...] = Field(
+        default_factory=tuple,
+        description="Palabras con timestamp. Vacío si word timestamps no se pidieron.",
     )
 
     @field_validator("end_ms")

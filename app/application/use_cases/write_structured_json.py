@@ -161,13 +161,23 @@ class RunStructuredJsonOutputUseCase:
         segments = []
         for idx, ts_seg in sorted(ts_by_index.items()):
             asr_seg = asr_by_index.get(idx)
+            words = []
+            if asr_seg is not None:
+                for word in getattr(asr_seg, "words", ()) or ():
+                    words.append({
+                        "text": str(word.text),
+                        "start_ms": int(word.start_ms),
+                        "end_ms": int(word.end_ms),
+                        "confidence": word.confidence,
+                    })
             segments.append({
                 "segment_index": idx,
                 "start_ms": int(ts_seg.start_ms),
                 "end_ms": int(ts_seg.end_ms),
                 "duration_ms": int(ts_seg.duration_ms),
                 "text": str(asr_seg.text) if asr_seg is not None else "",
-                "words": [],
+                "confidence": getattr(asr_seg, "confidence", None) if asr_seg is not None else None,
+                "words": words,
             })
         return {
             "schema_version": schema_version,
