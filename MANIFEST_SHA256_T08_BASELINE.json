@@ -1,0 +1,640 @@
+{
+  "manifest_type": "T08_PROTECTED_BASELINE",
+  "version": 1,
+  "created_at": "2026-08-20T20:59:09.852086+00:00",
+  "project_root": "C:\\Users\\Dirkin\\Documents\\IA Doblaje",
+  "protected_file_count": 105,
+  "excluded_t08_count": 8,
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "d708fa986a790651efdb5cca8afd3e7607b7c304f30a3324f6141633b29c88c8",
+      "size_bytes": 7746,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "93cd81e38aa1aa1f32588c1710de47ea7c0f3c5d706717ab8ab2feceec8a96b8",
+      "size_bytes": 2940,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "README.md",
+      "sha256": "e2255d277b3bd87d01fe56d90b159528d85057a9fe134d4184df1e949c3ead31",
+      "size_bytes": 10918,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/__init__.py",
+      "sha256": "e71ec75362f3300d485763c3cd2f9f6c9e581627bbab5109c62f31dee4b733a7",
+      "size_bytes": 883,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/__main__.py",
+      "sha256": "420023fea7a4cbd336d9609d48bd554becbaba21dcf453dfb9fe7da0224c7652",
+      "size_bytes": 376,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/pipeline/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/services/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/services/quality/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/use_cases/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/use_cases/analyze_media_prep.py",
+      "sha256": "dae6da54cd68419ad1c06e0c2195ba0a3f377f78212508886e918aeecc996615",
+      "size_bytes": 11229,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/use_cases/generate_timestamps.py",
+      "sha256": "a81ec98cc48d7273d45a460f633b61a8bd3f78c1621335bc901c4104b46f32c5",
+      "size_bytes": 8076,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/use_cases/run_asr.py",
+      "sha256": "33fb9354e9610d819b3c8f4c684464152c120f8302007e34a7f3b6d0cfb61e02",
+      "size_bytes": 9981,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/use_cases/run_language_detection.py",
+      "sha256": "ba30aa97d6ce75ec857fd94e45fe211e96074654be8f84fb8fd8d02160e3934a",
+      "size_bytes": 14868,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/application/use_cases/run_vad.py",
+      "sha256": "137b03c8049d0bb2fe97a8c329c0e65031a33adea0428dc1592d1722937d6b51",
+      "size_bytes": 8665,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/config.py",
+      "sha256": "2e4b1199d42648785df0a0678fab197fb7be462690a852e0091ba7190a6003d6",
+      "size_bytes": 21484,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/constants.py",
+      "sha256": "dbac5c4c50fdcd0826cc3b5b9060c152898a6fc194e8a67902e2737a47feaa16",
+      "size_bytes": 7784,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/device.py",
+      "sha256": "a5ef9566dbd74be9909dd92d5bf5d069f424d202c399cb1a4f3a9526e6729672",
+      "size_bytes": 18968,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/exceptions.py",
+      "sha256": "69afa41e2a4454b879a929d6f2847e8ccd08f38d4a2082c27c8bf0e4b00cf8c3",
+      "size_bytes": 5624,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/logging.py",
+      "sha256": "15b429cfce45b4e1be86902eba14ec2181fa6b14f816b321c9b97a4ab4359a63",
+      "size_bytes": 8697,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/core/paths.py",
+      "sha256": "053e3bf5094afe1b590f8350f5ef22d149ab1e5d385662da7c3768a74d0e34fc",
+      "size_bytes": 13604,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/entities/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/entities/asr.py",
+      "sha256": "fde15bb69bc926b5096ccfd71cbbb0c10a6138b71920284990fc93839913a7fe",
+      "size_bytes": 9389,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/entities/lid.py",
+      "sha256": "8d72e79f752e2523ecce8428b6f38b76ebb81fcba220231bf953a948af5a9cf3",
+      "size_bytes": 8840,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/entities/media.py",
+      "sha256": "efbd3e4d6d8a380754c2168fbedd9a3665732664cbd6ea40fc145e84004cf437",
+      "size_bytes": 8990,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/entities/timestamps.py",
+      "sha256": "cbeb6fe3319421dbdaf7712780079cb1600f0114ab015887c9de2740837644ed",
+      "size_bytes": 10191,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/entities/vad.py",
+      "sha256": "a1d53724433164085b036e806497f4a00b7682bc67bda1e20c5c061ff58d7238",
+      "size_bytes": 5668,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/interfaces/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/interfaces/asr_ports.py",
+      "sha256": "cccc28beca6d78f2f2ef553f2dd6ba4089b3b98b0d5c3edec2f711c1343c25d7",
+      "size_bytes": 1219,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/interfaces/audio_ports.py",
+      "sha256": "81d745ac24be22701d29a47fb06cf36b77942f412974a7a21d5a6424aae8d477",
+      "size_bytes": 7491,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/interfaces/lid_ports.py",
+      "sha256": "0e5fd757c8e99ef90e257eb21886841ada298915a443ed0ed0c20be0cf53a8ac",
+      "size_bytes": 1957,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/interfaces/timestamp_ports.py",
+      "sha256": "42320844a13802e535ee8a5c3cdd48b1018366b3df880050313f0927ead24c7d",
+      "size_bytes": 1880,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/interfaces/vad_ports.py",
+      "sha256": "1cdb481a11da79f68407950182685caaed35b37a2d7cf2d372c9d52e78808150",
+      "size_bytes": 1552,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/value_objects/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/value_objects/asr.py",
+      "sha256": "2a8385c398a8227acd2e73577a2b84ec26c432077727d7fab8aa63b64447e38a",
+      "size_bytes": 3427,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/value_objects/audio.py",
+      "sha256": "edc8650eb18be77a3f94e27729d09146f5be36bd33453293256dc954e1f1b41b",
+      "size_bytes": 3544,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/value_objects/lid.py",
+      "sha256": "6348ae07797f4fbf8eb4dfafca17c17fc7a0275839c934697b244a2183d99ccb",
+      "size_bytes": 7323,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/value_objects/timestamps.py",
+      "sha256": "164dc35db0361a8f9586f5f94b36eb59cd0d6cf521f6bc4cf5bf430d276701d2",
+      "size_bytes": 4191,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/domain/value_objects/vad.py",
+      "sha256": "70591646681697649b2529656a6bf8dc09758cea2c0737d23968df8846aea0bf",
+      "size_bytes": 5194,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/asr/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/audio/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/audio/basic_timestamp_normalizer_adapter.py",
+      "sha256": "2c430d02ec14d12c0d1833da51870f6f0ec0f9b01edcf580ffa7e7c9f1c7f4fe",
+      "size_bytes": 10844,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/audio/faster_whisper_asr_adapter.py",
+      "sha256": "702285049bf59861acc0522e4cdcd07ac27a44ef9842c9666ff81f0234c9ab0c",
+      "size_bytes": 18543,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/audio/ffmpeg_adapters.py",
+      "sha256": "7b354427a77792ec73b70789555d31c8831f00405ddbe65e98cb5665abe80373",
+      "size_bytes": 29496,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/audio/silero_vad_adapter.py",
+      "sha256": "25a5b45709c6fc6ffc8c34131b669d252070e6087c1876425cfe6c3e0fae6673",
+      "size_bytes": 23246,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/audio/whisper_lid_adapter.py",
+      "sha256": "be577fe7d434e334e020ee4ae7d82ab85b3cfd69da7fc835496a43135b4a58be",
+      "size_bytes": 24988,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/diarization/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/language/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/infrastructure/storage/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/presentation/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/presentation/cli/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/presentation/cli/main_group.py",
+      "sha256": "82be38e76f97022f5d0bf2b4fd424d83abd527e050ac1dde685a04362e9071f4",
+      "size_bytes": 13240,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "app/py.typed",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "configs/.gitkeep",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "configs/balanced.yaml",
+      "sha256": "985eb197ef09193e638a7a3ea1625237e3fb0a9bbe2f731e6b06538f6be6beba",
+      "size_bytes": 1080,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "configs/performance.yaml",
+      "sha256": "dd5f8cf41da0d0d8ae43960c6d5e23306966eb9ed51d8c558764ffc3aad37017",
+      "size_bytes": 1060,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "configs/quality.yaml",
+      "sha256": "16834e2f2a726763bafdf28919cb144d613e4f983aa6253427ec11352eee77cb",
+      "size_bytes": 1064,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "bc5642a7b3e826fd785c19d0c59aaabd27d2a26f6f63d221fc9391e6f0a540f2",
+      "size_bytes": 1985,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "docs/LICENSES_ANALYSIS.md",
+      "sha256": "6675caa5e1462d1c79077bb7c90e927c40e97850cb50815c2f34fb88e0463167",
+      "size_bytes": 7774,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "docs/METRICS.md",
+      "sha256": "9362949dca184afca0a9e4b111a2548af365617a2cd554407401957c4da1e8dc",
+      "size_bytes": 1942,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "docs/PIPELINE.md",
+      "sha256": "4268ad67dedeef017246c67440d04e8fc6b42c505fdca5c702f784bd4df4faa8",
+      "size_bytes": 2618,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "docs/QUALITY_RULES.md",
+      "sha256": "6599a0bb392eb16cae2a5076ef7eeb80a4435da0c189b3267e2f61c5a6aa6fec",
+      "size_bytes": 1493,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "docs/THIRD_PARTY_LICENSES.md",
+      "sha256": "e5438eb9cb41dbbf84f17a8bccf5e74ee631947181d3c8f7d18bbba4ee57afca",
+      "size_bytes": 10721,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "751fce1cc9a7a697a80e6c1cf0f65db774bb2134935defe4518f389f3f044014",
+      "size_bytes": 6323,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "scripts/.gitkeep",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "scripts/verify_third_party.py",
+      "sha256": "907e46c4c050fd085f5d96000b66a41e2838ae20f220be5f4f12dfd8f21b26f8",
+      "size_bytes": 15290,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/quality/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/test_analyze_media_prep_t03.py",
+      "sha256": "6fa1a86422b63c1345852c94a797c4a1d4534217d6a7e89aa878a038e235dd73",
+      "size_bytes": 11139,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/test_cli_t01.py",
+      "sha256": "f675d61ba6b16ecb8d4e1a6dc5e8199a08ee97cc983de7ede4cf654dd574321c",
+      "size_bytes": 2806,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/test_generate_timestamps_t07.py",
+      "sha256": "f415745a231491ce1a4b24eb3a66c786dbc80f095131a6f89e04ec54f7d35f18",
+      "size_bytes": 17441,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/test_run_asr_t06.py",
+      "sha256": "3fd25e980f869786baee0f1ae618ce82d444fd5be0acdfa4516a3bab33d36639",
+      "size_bytes": 15554,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/test_run_language_detection_t05.py",
+      "sha256": "3f2423692eb241e424114abef42b86f081986423aa6695a46b2c93893475013d",
+      "size_bytes": 19792,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/application/test_run_vad_t04.py",
+      "sha256": "c3044de180090d3cb142afdf77e2b9cae260eb1fbba4101ca35fd6425e36b2d0",
+      "size_bytes": 13012,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/conftest.py",
+      "sha256": "6ae272e764c6fec5a1edd4d60c752a29d37ad922c898780b76351e47bf390da1",
+      "size_bytes": 3626,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/core/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/core/test_config.py",
+      "sha256": "4f682412e296ba3e845dff642ad1e096a11c2635151691aa18551d4ca8691259",
+      "size_bytes": 10273,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/core/test_device.py",
+      "sha256": "a51d7a2fe5a18fdb70a4f13f2132a468ad03eafa960294689670b16477631623",
+      "size_bytes": 15965,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/core/test_logging.py",
+      "sha256": "1345333b57ba565d8ed89353c6d301c723e4eac0cca192ef1d80bf430ecf0ba9",
+      "size_bytes": 10431,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/core/test_paths.py",
+      "sha256": "3e4238549b4fb88dd92d50323124cee258862855907de4330490be7b8c2d2384",
+      "size_bytes": 9037,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/test_scaffolding_t01.py",
+      "sha256": "1b371f5cda8b6fbd76d46b05e03a0cb306d49c34883c44f0a01842acb30f45a0",
+      "size_bytes": 8716,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/test_value_objects_asr_t06.py",
+      "sha256": "f1a4fe886d61d10f5755743d40bdaa7ee85e2334b98042ebf722ffb2f213ce6d",
+      "size_bytes": 8212,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/test_value_objects_audio_t03.py",
+      "sha256": "f0ccf8351021a7cd9b2e99c1aef8e22d0b603ee73070d9bc602bf88f5eee0158",
+      "size_bytes": 4775,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/test_value_objects_lid_t05.py",
+      "sha256": "696a6dbfe4a3ed3db8dcc4cdc50e5e9af76d4931d9f223519777f36fe3c9b035",
+      "size_bytes": 12068,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/test_value_objects_timestamps_t07.py",
+      "sha256": "503fcb61bdedb07ab2ec9cb62cd6b91e92df1e094db30adb11ad080c86ce1bc5",
+      "size_bytes": 6826,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/domain/test_value_objects_vad_t04.py",
+      "sha256": "934e82968677cf86b5ab24877d73ae79d81bb863fdd67daf57ca7af33ea50db1",
+      "size_bytes": 4083,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/fixtures/synthetic_audio.py",
+      "sha256": "f11e8654a4e92c45f18c8ae42a169f801026f02646684f7ee66e4f34077fefef",
+      "size_bytes": 645,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/fixtures/wav_synth.py",
+      "sha256": "3c66fb40df398f789cb63b9881911960edefea7845c595daaaab2b2d02e9c6ba",
+      "size_bytes": 3494,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/asr/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/audio/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/audio/test_basic_timestamp_normalizer_adapter_t07.py",
+      "sha256": "7e957322e57bdab28caa99e2cfb08298eeea194ed34860426469368f1fb1898f",
+      "size_bytes": 17146,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/audio/test_faster_whisper_asr_adapter_t06.py",
+      "sha256": "3c2efb8c5d9d3e46c143842104800f8b3ad309e40d43e443b68d44172838da93",
+      "size_bytes": 26515,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/audio/test_ffmpeg_adapters_t03.py",
+      "sha256": "0a85acf8fccd6852b42a2b5457d786097c7481ce9f70b91052a49d9b0f59a57c",
+      "size_bytes": 25097,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/audio/test_silero_vad_adapter_t04.py",
+      "sha256": "5e0dd0122732b66f4424bb583996c8a56a7db6e22f4231215072bee484f73e5f",
+      "size_bytes": 18951,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/audio/test_whisper_lid_adapter_t05.py",
+      "sha256": "c439c710fb63d17cf938bce46711aadcc0ac48cd71efc5933335deb987ea95d3",
+      "size_bytes": 27184,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/diarization/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/infrastructure/storage/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/integration/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    },
+    {
+      "path": "tests/integration/fixtures_clips/.gitkeep",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "status": "BASELINE_PROTECTED"
+    }
+  ]
+}
