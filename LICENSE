@@ -1,0 +1,65 @@
+IA DOBLAJE ENGINE - LICENCIA DE USO INTERNO / PROPIETARIA
+==============================================================
+
+Copyright (c) 2026 - Todos los derechos reservados.
+
+ESTE SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO,
+EXPRESA O IMPLÍCITA, INCLUYENDO PERO NO LIMITADO A GARANTÍAS DE
+COMERCIALIZACIÓN, ADECUACIÓN PARA UN PROPÓSITO PARTICULAR E
+INFRACCIÓN DE DERECHOS DE TERCEROS. EN NINGÚN CASO LOS AUTORES O
+TITULARES DEL COPYRIGHT SERÁN RESPONSABLES DE NINGUNA RECLAMACIÓN,
+DAÑOS U OTRAS RESPONSABILIDADES, YA SEA EN ACCIÓN DE CONTRATO,
+AGRAVIO O CUALQUIER OTRO MOTIVO, QUE SURJA DE, FUERA DE O EN
+CONEXIÓN CON EL SOFTWARE O EL USO U OTROS TRATOS EN EL SOFTWARE.
+
+------------------------------------------------------------------
+LICENCIAS DE TERCEROS (THIRD-PARTY LICENSES)
+------------------------------------------------------------------
+
+ESTE PRODUCTO INCLUYE SOFTWARE DE TERCEROS BAJO DIVERSAS LICENCIAS
+OPEN SOURCE.
+
+ANTES DE CUALQUIER USO COMERCIAL, DISTRIBUCIÓN O DESPLIEGUE EN
+PRODUCCIÓN, ES OBLIGATORIO LEER Y CUMPLIR LAS CONDICIONES
+DETALLADAS EN:
+
+    docs/THIRD_PARTY_LICENSES.md
+    docs/LICENSES_ANALYSIS.md
+
+ESTOS DOCUMENTOS CONTIENEN EL DETALLE COMPLETO DE:
+    - Cada dependencia utilizada
+    - La licencia del código fuente
+    - La licencia de los pesos / checkpoints / modelos preentrenados
+    - Restricciones de redistribución
+    - Requisitos de atribución
+    - Componentes que requieren REVISIÓN LEGAL antes de uso comercial
+    - Instrucciones de construcción LGPL para FFmpeg
+
+EL INCUMPLIMIENTO DE ESTAS LICENCIAS PUEDE RESULTAR EN ACCIONES
+LEGALES POR PARTE DE LOS TITULARES DE LOS DERECHOS DE AUTOR.
+
+------------------------------------------------------------------
+RESTRICCIONES ESPECIALES - FASE 1 DESARROLLO
+------------------------------------------------------------------
+
+Durante la Fase 1 (desarrollo del motor de análisis de audio):
+
+1. El motor de análisis no genera contenido doblado final.
+2. Los modelos de terceros (ASR, diarización, VAD) se descargan
+   dinámicamente o bajo demanda y no se redistribuyen con este
+   repositorio sin la correspondiente verificación legal.
+3. Los usuarios finales son responsables de aceptar los Términos
+   de Servicio de Hugging Face y cualquier gate de modelos antes
+   de descargar pesos restringidos (ej: pyannote gated weights).
+4. FFmpeg se distribuye DINÁMICAMENTE (dynamic link) y NO se
+   incluye código objeto ni binarios de FFmpeg dentro de este
+   repositorio. Para builds Docker, véase la receta en Dockerfile
+   y docs/LICENSES_ANALYSIS.md sección FFmpeg.
+
+------------------------------------------------------------------
+CONTACTO LEGAL
+------------------------------------------------------------------
+
+Cualquier duda sobre cumplimiento de licencias:
+Revise docs/LICENSES_ANALYSIS.md y contacte al responsable legal
+del proyecto antes de cualquier redistribución o uso comercial.
