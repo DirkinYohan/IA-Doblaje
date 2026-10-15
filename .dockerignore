@@ -1,0 +1,47 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info
+.venv/
+venv/
+.git/
+.gitignore
+.github/
+
+# Data local - NUNCA en imagen
+data/input/*
+data/output/*
+data/temporary/*
+models/*
+*.wav
+*.mp3
+*.mp4
+*.mkv
+*.json
+*.log
+
+# IDE
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# Coverage / tests output
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Docs (incluir solo si necesario runtime, por defecto no)
+docs/
+!docs/THIRD_PARTY_LICENSES.md
+!docs/LICENSES_ANALYSIS.md
+
+# Env
+.env
+!README.md
+!.env.example
+
+# Docker files locales
+docker-compose.override.yml
+Dockerfile.local
