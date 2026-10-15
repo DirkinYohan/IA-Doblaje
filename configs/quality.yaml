@@ -1,0 +1,19 @@
+# Perfil quality. Beam más alto y float16 si hay GPU.
+# En CPU resolve_compute_type deja constancia y usa int8.
+processing:
+  profile: quality
+  device: auto
+  force_cpu: false
+
+asr:
+  adapter: faster-whisper
+  model_name: small
+  model_folder: whisper_small_ct2_int8_fp16_local_v1
+  compute_type: float16
+  beam_size: 5
+  word_timestamps: true
+  chunk_by_vad: true
+
+diarization:
+  adapter: wespeaker
+  model_name: pyannote/wespeaker-voxceleb-resnet34-LM
