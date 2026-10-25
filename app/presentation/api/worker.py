@@ -683,28 +683,111 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
         asr=asr_adapter,
         vad=object(),
         language=None if source in {"", "und"} else source,
-        window_ms=30_000,
+        # Ventanas de 15 s: el ASR tarda menos por tramo y los subtítulos
+        # llegan más a menudo (con 30 s la espera entre lotes era el doble).
+        window_ms=15_000,
         overlap_ms=1_000,
         # La primera ventana es corta para que el primer subtítulo aparezca en
         # segundos, no tras medio minuto de audio.
-        first_window_ms=8_000,
+        first_window_ms=6_000,
     )
 
-    # Índice de inicio de la ventana actual por idioma: así el evento publica
-    # EXACTAMENTE los cues de este lote y no los de una ventana anterior.
-    window_start: dict[str, int] = {code: 0 for code in cues_by_language}
+    # --- Traducción en segundo plano ---------------------------------------
+    # El idioma original NO espera a las traducciones. Antes `_on_cues` traducía
+    # a todos los idiomas antes de emitir nada, así que la primera ventana podía
+    # estar lista a los 11 s y el primer subtítulo no aparecer hasta los 33 s
+    # (lo que M2M100 tarda en cargar). Ahora se publica el original en cuanto
+    # existe y cada traducción llega cuando está lista.
+    translation_queue: _queue_module.Queue = _queue_module.Queue()
+    translation_lock = threading.Lock()
+
+    def _translation_worker() -> None:
+        while True:
+            item = translation_queue.get()
+            try:
+                if item is None:
+                    return
+                window_cues = item
+                texts = [str(cue.text) for cue in window_cues]
+                for target in targets:
+                    if target == source:
+                        continue
+                    try:
+                        translated = _translate(texts, target)
+                    except Exception as exc:  # noqa: BLE001
+                        # Una traducción fallida NO puede pasar por éxito
+                        # silencioso: se registra y el trabajo será PARTIAL.
+                        message = f"{target}: {exc}"
+                        with translation_lock:
+                            if message not in translation_errors:
+                                translation_errors.append(message)
+                        publish(
+                            job_id,
+                            {
+                                "type": "translation_failed",
+                                "job_id": job_id,
+                                "language": target,
+                                "error": str(exc),
+                            },
+                        )
+                        continue
+
+                    batch: list[dict[str, Any]] = []
+                    with translation_lock:
+                        for cue, text in zip(window_cues, translated, strict=False):
+                            cues_by_language.setdefault(target, []).append(
+                                {
+                                    "index": next_index[target],
+                                    "start_ms": int(cue.start_ms),
+                                    "end_ms": int(cue.end_ms),
+                                    "text": str(text),
+                                    "speaker": str(getattr(cue, "speaker", "") or ""),
+                                    "language": target,
+                                    "state": "final",
+                                }
+                            )
+                            next_index[target] += 1
+                            batch.append(
+                                {
+                                    "start_ms": int(cue.start_ms),
+                                    "end_ms": int(cue.end_ms),
+                                    "text": str(text),
+                                }
+                            )
+                        total = _persist_language(target)
+
+                    if batch:
+                        # Un evento por idioma: el reproductor añade la pista
+                        # sin tocar las que ya mostraba.
+                        publish(
+                            job_id,
+                            {
+                                "type": "subtitle_created",
+                                "job_id": job_id,
+                                "project_id": project["id"],
+                                "covered_ms": int(window_cues[-1].end_ms),
+                                "duration_ms": duration_ms,
+                                "progress": tracker.percent,
+                                "source_language": source,
+                                "cues": [],
+                                "cues_by_language": {target: batch},
+                                "totals": {target: total},
+                            },
+                        )
+            finally:
+                translation_queue.task_done()
+
+    threading.Thread(
+        target=_translation_worker, name=f"i18n-{job_id[:8]}", daemon=True
+    ).start()
 
     def _on_cues(window: Any) -> None:
-        """Cada ventana: traducir, persistir y emitir. Nunca al final."""
+        """Cada ventana: publicar el original YA y encolar sus traducciones."""
         if cancel_event is not None and cancel_event.is_set():
             return
         source_cues = list(window.cues)
         if not source_cues:
             return
-
-        # Cada pista arranca esta ventana donde terminó la anterior.
-        for code in cues_by_language:
-            window_start[code] = len(cues_by_language[code])
 
         for cue in source_cues:
             cues_by_language.setdefault(source, []).append(
@@ -720,53 +803,25 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
             )
             next_index[source] += 1
 
-        # Traducción por lotes: una sola pasada de `generate` por ventana.
-        texts = [str(cue.text) for cue in source_cues]
-        for target in targets:
-            if target == source:
-                continue
-            try:
-                translated = _translate(texts, target)
-            except Exception as exc:  # noqa: BLE001
-                # Una traducción fallida NO puede pasar por éxito silencioso:
-                # se registra la causa y el trabajo terminará en PARTIAL.
-                message = f"{target}: {exc}"
-                if message not in translation_errors:
-                    translation_errors.append(message)
-                publish(
-                    job_id,
-                    {
-                        "type": "translation_failed",
-                        "job_id": job_id,
-                        "language": target,
-                        "error": str(exc),
-                    },
-                )
-                continue
-            for cue, text in zip(source_cues, translated, strict=False):
-                cues_by_language.setdefault(target, []).append(
-                    {
-                        "index": next_index[target],
-                        "start_ms": int(cue.start_ms),
-                        "end_ms": int(cue.end_ms),
-                        "text": str(text),
-                        "speaker": str(getattr(cue, "speaker", "") or ""),
-                        "language": target,
-                        "state": "final",
-                    }
-                )
-                next_index[target] += 1
-
-        totals = {code: _persist_language(code) for code in cues_by_language}
+        # 1) Original: persistir y emitir inmediatamente.
+        total_source = _persist_language(source)
+        source_batch = [
+            {
+                "start_ms": int(cue.start_ms),
+                "end_ms": int(cue.end_ms),
+                "text": str(cue.text),
+            }
+            for cue in source_cues
+        ]
         covered = int(window.end_ms)
         if duration_ms > 0:
             # 10 %..95 % del progreso corresponde al audio ya transcrito.
-            target = 10 + int(85 * min(1.0, covered / duration_ms))
+            percent = 10 + int(85 * min(1.0, covered / duration_ms))
         else:
-            target = max(tracker.percent, 20)
+            percent = max(tracker.percent, 20)
         # `_persist` deja la etapa en el historial; `set_progress` calcula el %
         # garantizando que nunca retrocede.
-        _persist(*tracker.set_progress("CUES_READY", target))
+        _persist(*tracker.set_progress("CUES_READY", percent))
         db.run(
             conn,
             "UPDATE jobs SET last_cue_ms=?, updated_at=? WHERE id=? AND status!='CANCELLED'",
@@ -777,22 +832,6 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
             "UPDATE projects SET status='PARTIALLY_READY' WHERE id=?",
             (project["id"],),
         )
-
-        # El evento lleva TODAS las traducciones del lote, no sólo el original:
-        # el reproductor cambia de idioma sin volver a procesar el vídeo.
-        by_language: dict[str, list[dict[str, Any]]] = {}
-        for code, entries in cues_by_language.items():
-            fresh = entries[window_start.get(code, 0):]
-            if not fresh:
-                continue
-            by_language[code] = [
-                {
-                    "start_ms": int(cue["start_ms"]),
-                    "end_ms": int(cue["end_ms"]),
-                    "text": str(cue["text"]),
-                }
-                for cue in fresh
-            ]
         publish(
             job_id,
             {
@@ -803,13 +842,15 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
                 "duration_ms": duration_ms,
                 "progress": tracker.percent,
                 "source_language": source,
-                # Compatibilidad: cues del idioma original.
-                "cues": by_language.get(source, []),
-                # Todas las pistas de este lote.
-                "cues_by_language": by_language,
-                "totals": totals,
+                "cues": source_batch,
+                "cues_by_language": {source: source_batch},
+                "totals": {source: total_source},
             },
         )
+
+        # 2) Traducciones: en su propio hilo, sin bloquear el siguiente tramo.
+        if any(target != source for target in targets):
+            translation_queue.put(source_cues)
 
     try:
         transcriber.process(
@@ -826,9 +867,17 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
 
     if cancel_event is not None and cancel_event.is_set():
         _persist("CANCELLED", tracker.percent, "CANCELLED")
+        translation_queue.put(None)
         return
 
     # --- 3) Cierre --------------------------------------------------------
+    # Las traducciones van por detrás del ASR: antes de dar el trabajo por
+    # terminado hay que esperar a que su cola se vacíe, o el último lote se
+    # perdería.
+    if any(target != source for target in targets):
+        translation_queue.join()
+        translation_queue.put(None)
+
     _persist(*tracker.set_progress("FINALIZING", 97))
     total_cues = len(cues_by_language.get(source, []))
     # Si alguna pista pedida quedó vacía, el trabajo NO es un éxito completo.
