@@ -35,6 +35,13 @@ def pytest_configure(config: pytest.Config) -> None:
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(PROJECT_ROOT))
 
+    # Las pruebas SIEMPRE contra SQLite, aunque el proyecto tenga configurada
+    # una base PostgreSQL en `.env`. Sin esto, correr la suite escribiría en la
+    # base real: crearía usuarios y borraría tablas de producción.
+    os.environ["IA_DB_BACKEND"] = "sqlite"
+    os.environ.pop("IA_DATABASE_URL", None)
+    os.environ.pop("DATABASE_URL", None)
+
     # Crear directorios de trabajo si no existen
     for directory in (DATA_INPUT_DIR, DATA_OUTPUT_DIR, DATA_TEMP_DIR, MODELS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
