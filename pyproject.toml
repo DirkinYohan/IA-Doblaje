@@ -56,6 +56,10 @@ dependencies = [
     "psutil>=5.9",
     "PyYAML>=6.0",
     "transformers>=4.41",
+    # Persistencia. Sin IA_DATABASE_URL la API usa SQLite; con ella, PostgreSQL
+    # (Supabase). python-dotenv permite que `.env` configure la conexión.
+    "psycopg[binary]>=3.1",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
