@@ -15,8 +15,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from app.core.config import get_settings
 from app.core.exceptions import PipelineCancelled
-from app.presentation.api import db
+from app.presentation.api import db, media_store
 from app.presentation.api.progress import ProgressTracker, canonical_key
 
 
@@ -219,6 +220,9 @@ def _loop(conn: Any, generation: int) -> None:
                 pass
             return
         try:
+            # Antes de empezar, limpia los medios que dejó el trabajo anterior:
+            # así un fallo de cierre no acumula archivos entre trabajos.
+            _purge_media_temp()
             _run_job(conn, job_id)
         except Exception as exc:  # noqa: BLE001
             # Marcar el fallo nunca debe matar el hilo: si la conexión ya no
@@ -232,6 +236,9 @@ def _loop(conn: Any, generation: int) -> None:
             except Exception:  # noqa: BLE001
                 pass
         finally:
+            # Red de seguridad: aunque `_run_job` no llegue a su propio cierre,
+            # los medios descargados no se quedan en disco.
+            _purge_media_temp()
             try:
                 current.task_done()
             except Exception:  # noqa: BLE001
@@ -261,11 +268,40 @@ def _run_job(conn: Any, job_id: str) -> None:
     # El bus es en memoria: se avisa de que se empieza.
     publish(job_id, {"type": "processing_started", "job_id": job_id, "mode": mode})
 
-    if mode == "progressive":
-        _run_job_progressive(conn, job_id, job, project)
+    try:
+        if mode == "progressive":
+            _run_job_progressive(conn, job_id, job, project)
+            return
+
+        _run_job_full(conn, job_id, job, project)
+    finally:
+        # Los medios descargados de Storage son temporales: se borran siempre,
+        # haya terminado bien, mal o cancelado. Nada permanente en disco.
+        _purge_media_temp()
+
+
+def _purge_media_temp() -> None:
+    """Borra los medios materializados. Nunca lanza: es limpieza.
+
+    Se hace en un hilo aparte porque en Windows el archivo puede seguir
+    retenido por el FFmpeg que acaba de terminar; así el worker no se queda
+    esperando y el borrado se reintenta hasta que el sistema lo libera.
+    """
+    try:
+        temp_root = Path(str(get_settings().paths.data_temp_dir))
+    except Exception:  # noqa: BLE001
         return
 
-    _run_job_full(conn, job_id, job, project)
+    def _worker() -> None:
+        try:
+            media_store.purge_temp(temp_root, attempts=40, interval=0.5)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        threading.Thread(target=_worker, name="purge-media", daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
@@ -331,8 +367,24 @@ def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
     pipeline.cancel_event = _CANCEL.get(job_id)
     pipeline.progress_callback = _progress
 
+    # Con el original en Storage hay que bajarlo a un temporal para procesarlo.
+    temp_root = Path(str(settings.paths.data_temp_dir))
+    remote = media_store.is_remote(project["media_path"])
+    local_media: Path | None = None
     try:
-        results = pipeline.run(project["media_path"], job_id=job_id)
+        local_media = media_store.materialize(
+            project["media_path"], temp_root, label=job_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        db.run(
+            conn,
+            "UPDATE jobs SET status='FAILED', error=?, updated_at=? WHERE id=?",
+            (f"no se pudo obtener el vídeo: {exc}", _utcnow(), job_id),
+        )
+        return
+
+    try:
+        results = pipeline.run(str(local_media), job_id=job_id)
     except PipelineCancelled:
         _persist("CANCELLED", tracker.percent, "CANCELLED")
         return
@@ -343,6 +395,9 @@ def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
             (str(exc), _utcnow(), job_id),
         )
         return
+    finally:
+        if remote:
+            media_store.release(local_media, temp_root)
 
     status = str(results.get("status") or "SUCCESS")
 
@@ -472,7 +527,7 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
     # que esperar al loudnorm a dos pasadas + VAD + LID del archivo entero).
     _persist(*tracker.set_progress("EXTRACTING_AUDIO", 3))
     try:
-        reader = _open_segment_reader(project)
+        reader = _open_segment_reader(project, Path(str(settings.paths.data_temp_dir)))
     except Exception as exc:  # noqa: BLE001
         _fail(f"no se pudo leer el audio del vídeo: {exc}")
         return
@@ -810,12 +865,19 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
     )
 
 
-def _open_segment_reader(project: Any) -> Any:
-    """Lector de audio por tramos sobre el vídeo ORIGINAL (sólo lectura)."""
+def _open_segment_reader(project: Any, temp_dir: Path) -> Any:
+    """Lector de audio por tramos sobre el vídeo ORIGINAL (sólo lectura).
+
+    Si el original vive en Storage, se descarga antes a un temporal. Ese
+    temporal lo borra `_run_job` al terminar: aquí no se libera porque el
+    lector lo necesita durante todo el trabajo.
+    """
     from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
     from app.infrastructure.audio.ffmpeg_segment_reader import FFmpegSegmentReader
 
-    media_path = Path(str(project["media_path"]))
+    media_path = media_store.materialize(
+        project["media_path"], temp_dir, label=f"reader-{project['id']}"
+    )
     if not media_path.is_file():
         raise FileNotFoundError(f"el vídeo original no existe: {media_path!s}")
     resolver = SubprocessFFmpegBinaryResolver()

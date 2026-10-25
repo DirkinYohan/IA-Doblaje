@@ -14,12 +14,12 @@ from typing import Any, Iterator
 
 from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from app.application.use_cases.build_subtitles import cue_from_dict, cue_to_dict, zip_exports
 from app.core.config import PROJECT_ROOT, get_settings
 from app.infrastructure.subtitles.exporters import to_ass, to_srt, to_vtt
-from app.presentation.api import db, worker
+from app.presentation.api import db, media_store, worker
 from app.presentation.api.realtime import RealtimeSession, m2m_translator, whisper_transcriber
 from app.presentation.api.security import RateLimiter, hash_password, new_token, token_hash, verify_password
 
@@ -31,6 +31,19 @@ UPLOAD_CHUNK = 1024 * 1024  # 1 MiB por lectura: nunca el archivo entero en RAM
 MAX_NAME = 80
 MAX_TITLE = 180
 _SAFE_STEM = re.compile(r"[^A-Za-z0-9._-]+")
+
+# Tipo MIME por extensión: lo necesita la subida a Storage para servirlo bien.
+_MIME_BY_EXT = {
+    "mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime",
+    "mkv": "video/x-matroska", "webm": "video/webm", "avi": "video/x-msvideo",
+    "wav": "audio/wav", "mp3": "audio/mpeg", "m4a": "audio/mp4",
+    "flac": "audio/flac", "ogg": "audio/ogg",
+}
+
+
+def _guess_mime(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return _MIME_BY_EXT.get(ext, "application/octet-stream")
 
 
 def _now() -> str:
@@ -45,6 +58,7 @@ def _paths() -> dict[str, Path]:
         "mail": Path(os.environ.get("IA_MAIL_DIR", root / "data" / "mail")),
         "input": Path(settings.paths.data_input_dir),
         "output": Path(settings.paths.data_output_dir),
+        "temp": Path(settings.paths.data_temp_dir),
     }
 
 
@@ -167,15 +181,28 @@ def _ensure_project_metadata(conn: Any, input_root: Path, project: Any) -> Any:
     keys = project.keys()
     duration_ms = int(project["duration_ms"] or 0) if "duration_ms" in keys else 0
     thumbnail_path = str(project["thumbnail_path"] or "") if "thumbnail_path" in keys else ""
-    thumb_ok = bool(thumbnail_path) and Path(thumbnail_path).is_file()
+    # Una miniatura en Storage ya es válida por definición: no hay archivo local
+    # que comprobar.
+    thumb_ok = bool(thumbnail_path) and (
+        media_store.is_remote(thumbnail_path) or Path(thumbnail_path).is_file()
+    )
     if duration_ms > 0 and thumb_ok:
         return project
 
+    # Con el medio en Storage se descarga sólo para medirlo y miniaturizarlo.
+    remote = media_store.is_remote(project["media_path"])
+    media: Path | None = None
     try:
-        media = Path(project["media_path"]).resolve()
-        if not str(media).startswith(str(input_root.resolve())) or not media.is_file():
-            return project
-    except (OSError, ValueError, TypeError):
+        if remote:
+            media = media_store.materialize(
+                project["media_path"], input_root.parent / "temporary",
+                label=f"meta-{project['id']}",
+            )
+        else:
+            media = Path(project["media_path"]).resolve()
+            if not str(media).startswith(str(input_root.resolve())) or not media.is_file():
+                return project
+    except (OSError, ValueError, TypeError, Exception):  # noqa: BLE001
         return project
 
     new_duration = duration_ms
@@ -184,11 +211,21 @@ def _ensure_project_metadata(conn: Any, input_root: Path, project: Any) -> Any:
         if new_duration <= 0:
             new_duration = _probe_duration_ms(media)
         if not new_thumbnail:
-            candidate = media.parent / "thumbnail.jpg"
+            candidate = Path(media).parent / "thumbnail.jpg"
             if _write_thumbnail(media, candidate):
-                new_thumbnail = str(candidate)
+                if remote:
+                    bucket = os.environ.get("SUPABASE_BUCKET", "media")
+                    key = f"{project['user_id']}/{project['id']}/thumbnail.jpg"
+                    media_store.upload_bytes(candidate.read_bytes(), key, "image/jpeg")
+                    new_thumbnail = media_store.make_uri(bucket, key)
+                    candidate.unlink(missing_ok=True)
+                else:
+                    new_thumbnail = str(candidate)
     except Exception:  # noqa: BLE001
         return project
+    finally:
+        if remote:
+            media_store.release(media, input_root.parent / "temporary")
 
     if new_duration == duration_ms and new_thumbnail == thumbnail_path:
         return project
@@ -229,6 +266,18 @@ def create_app() -> FastAPI:
     app.state.login_limit = RateLimiter(10, 60)
     app.state.register_limit = RateLimiter(5, 60)
     app.state.forgot_limit = RateLimiter(5, 300)
+    # Restos de un cierre abrupto: los medios materializados de Storage no
+    # deben sobrevivir a un reinicio.
+    try:
+        media_store.purge_temp(Path(str(settings.paths.data_temp_dir)), attempts=5, interval=0.2)
+        uploads = Path(str(settings.paths.data_temp_dir)) / "uploads"
+        if uploads.is_dir():
+            import shutil as _shutil
+
+            _shutil.rmtree(uploads, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        pass
+
     app.state.worker_enabled = os.environ.get("IA_DISABLE_WORKER") != "1"
     if app.state.worker_enabled:
         worker.start(conn)
@@ -496,16 +545,25 @@ def create_app() -> FastAPI:
 
         max_bytes = int(os.environ.get("IA_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
         project_id = str(uuid.uuid4())
-        folder = (paths["input"] / row["id"] / project_id).resolve()
-        root = paths["input"].resolve()
-        if not str(folder).startswith(str(root)):
-            raise HTTPException(status_code=400, detail="Ruta rechazada")
-        folder.mkdir(parents=True, exist_ok=True)
-        target = folder / filename
+
+        # Con Storage configurado el archivo NO se queda en disco: se copia a un
+        # temporal, se sube al bucket y el temporal se borra. Sin Storage se
+        # mantiene el comportamiento local de siempre.
+        use_storage = media_store.configured()
+        if use_storage:
+            target = paths["temp"] / "uploads" / f"{project_id}-{filename}"
+        else:
+            folder = (paths["input"] / row["id"] / project_id).resolve()
+            root = paths["input"].resolve()
+            if not str(folder).startswith(str(root)):
+                raise HTTPException(status_code=400, detail="Ruta rechazada")
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / filename
 
         # Streaming a disco: el archivo NUNCA se carga entero en RAM.
         written = 0
         try:
+            target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("wb") as sink:
                 while True:
                     chunk = await file.read(UPLOAD_CHUNK)
@@ -531,9 +589,41 @@ def create_app() -> FastAPI:
             target.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail="El archivo está vacío")
 
+        # Duración y miniatura se calculan sobre el temporal, antes de subirlo.
         duration_ms = _probe_duration_ms(target)
-        thumbnail = folder / "thumbnail.jpg"
-        has_thumb = _write_thumbnail(target, thumbnail)
+
+        if use_storage:
+            media_key = f"{row['id']}/{project_id}/{filename}"
+            thumb_key = f"{row['id']}/{project_id}/thumbnail.jpg"
+            thumb_temp = paths["temp"] / "uploads" / f"{project_id}-thumbnail.jpg"
+            has_thumb = _write_thumbnail(target, thumb_temp)
+            try:
+                media_store.upload_file(target, media_key, _guess_mime(filename))
+                if has_thumb:
+                    media_store.upload_bytes(
+                        thumb_temp.read_bytes(), thumb_key, "image/jpeg"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                target.unlink(missing_ok=True)
+                thumb_temp.unlink(missing_ok=True)
+                _raise_engine_error("No se pudo subir el archivo al almacenamiento", exc)
+            finally:
+                target.unlink(missing_ok=True)
+                thumb_temp.unlink(missing_ok=True)
+
+            media_value = media_store.make_uri(
+                os.environ.get("SUPABASE_BUCKET", "media"), media_key
+            )
+            thumb_value = (
+                media_store.make_uri(os.environ.get("SUPABASE_BUCKET", "media"), thumb_key)
+                if has_thumb
+                else ""
+            )
+        else:
+            thumbnail = folder / "thumbnail.jpg"
+            has_thumb = _write_thumbnail(target, thumbnail)
+            media_value = str(target)
+            thumb_value = str(thumbnail) if has_thumb else ""
 
         db.run(
             conn,
@@ -543,8 +633,8 @@ def create_app() -> FastAPI:
             VALUES (?, ?, ?, ?, ?, 'READY', ?, ?, ?, ?, ?)
             """,
             (
-                project_id, row["id"], filename, source, ",".join(targets), str(target),
-                _now(), duration_ms, str(thumbnail) if has_thumb else "", _now(),
+                project_id, row["id"], filename, source, ",".join(targets), media_value,
+                _now(), duration_ms, thumb_value, _now(),
             ),
         )
         # El job queda listo pero NO arranca: el usuario pulsa «Producir».
@@ -563,9 +653,30 @@ def create_app() -> FastAPI:
     def delete_video(project_id: str, ia_session: str | None = Cookie(default=None)) -> dict[str, bool]:
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
-        media = Path(project["media_path"])
-        if media.is_file():
-            media.unlink()
+
+        # Al borrar el proyecto también se borra su objeto del almacenamiento.
+        media_path = project["media_path"]
+        if media_store.is_remote(media_path):
+            key = media_store.object_key(media_path)
+            if key:
+                try:
+                    media_store.delete(key)
+                except Exception:  # noqa: BLE001 - borrar el proyecto manda
+                    pass
+        else:
+            media = Path(media_path)
+            if media.is_file():
+                media.unlink()
+
+        thumb_path = str(project["thumbnail_path"] or "")
+        if media_store.is_remote(thumb_path):
+            thumb_key = media_store.object_key(thumb_path)
+            if thumb_key:
+                try:
+                    media_store.delete(thumb_key)
+                except Exception:  # noqa: BLE001
+                    pass
+
         db.run(conn, "DELETE FROM subtitles WHERE project_id=?", (project_id,))
         db.run(conn, "DELETE FROM jobs WHERE project_id=?", (project_id,))
         db.run(conn, "DELETE FROM projects WHERE id=?", (project_id,))
@@ -586,7 +697,17 @@ def create_app() -> FastAPI:
     def media(project_id: str, ia_session: str | None = Cookie(default=None)) -> FileResponse:
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
-        path = Path(project["media_path"]).resolve()
+        media_path = project["media_path"]
+
+        # En Storage: se redirige a una URL firmada y el navegador descarga
+        # directamente de Supabase, con soporte de Range para el seek.
+        if media_store.is_remote(media_path):
+            url = media_store.signed_url(media_path, expires_in=3600)
+            if url:
+                return RedirectResponse(url, status_code=307)
+            raise HTTPException(status_code=503, detail="Almacenamiento no disponible")
+
+        path = Path(media_path).resolve()
         if not path.is_file() or not str(path).startswith(str(paths["input"].resolve())):
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         return FileResponse(path)
@@ -650,17 +771,36 @@ def create_app() -> FastAPI:
         """
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
-        media = Path(str(project["media_path"])).resolve()
-        root = paths["input"].resolve()
-        if not str(media).startswith(str(root)) or not media.is_file():
-            raise HTTPException(status_code=404, detail="Archivo original no encontrado")
-        report = _probe_streams(media)
+        media_path = project["media_path"]
+
+        # Si el original está en Storage se descarga a un temporal sólo para
+        # poder pasarle ffprobe, y se borra al terminar.
+        remote = media_store.is_remote(media_path)
+        media: Path | None = None
+        try:
+            if remote:
+                media = media_store.materialize(
+                    media_path, paths["temp"], label=f"check-{project_id}"
+                )
+            else:
+                candidate = Path(str(media_path)).resolve()
+                root = paths["input"].resolve()
+                if not str(candidate).startswith(str(root)) or not candidate.is_file():
+                    raise HTTPException(status_code=404, detail="Archivo original no encontrado")
+                media = candidate
+
+            report = _probe_streams(media)
+        finally:
+            if remote:
+                media_store.release(media, paths["temp"])
+
         audio_ok = report["audio_streams"] >= 1 and report["video_streams"] >= 1
         return {
             "project_id": project_id,
             "original": report,
             "preserved": audio_ok,
             "duration_ms": int(project["duration_ms"] or 0),
+            "storage": "supabase" if remote else "local",
         }
 
     @app.get("/api/videos/{project_id}/thumbnail")
@@ -670,6 +810,13 @@ def create_app() -> FastAPI:
         raw = str(project["thumbnail_path"] or "")
         if not raw:
             raise HTTPException(status_code=404, detail="Sin miniatura")
+
+        if media_store.is_remote(raw):
+            url = media_store.signed_url(raw, expires_in=3600)
+            if not url:
+                raise HTTPException(status_code=503, detail="Almacenamiento no disponible")
+            return RedirectResponse(url, status_code=307)
+
         path = Path(raw).resolve()
         root = paths["input"].resolve()
         if not str(path).startswith(str(root)) or not path.is_file():

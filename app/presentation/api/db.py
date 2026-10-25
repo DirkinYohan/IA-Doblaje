@@ -106,18 +106,9 @@ def _load_env_once() -> None:
 
     `override=False`: lo que ya esté definido en el entorno real manda.
     """
-    global _ENV_LOADED
-    if _ENV_LOADED:
-        return
-    _ENV_LOADED = True
-    path = Path(PROJECT_ROOT) / ".env"
-    if not path.is_file():
-        return
-    try:
-        from dotenv import load_dotenv
-    except ImportError:  # pragma: no cover - dependencia opcional
-        return
-    load_dotenv(path, override=False)
+    from app.core.env import load_project_env
+
+    load_project_env()
 
 
 def database_url() -> str:
@@ -209,7 +200,20 @@ def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
                 'Instálalo con: pip install "psycopg[binary]"'
             ) from exc
         try:
-            raw = psycopg.connect(url, row_factory=dict_row, connect_timeout=int(timeout))
+            # `statement_timeout` es imprescindible: sin él una consulta que el
+            # servidor no responde (o un bloqueo del pooler) cuelga el hilo del
+            # worker para siempre, y con él la limpieza de temporales y todos
+            # los trabajos siguientes.
+            raw = psycopg.connect(
+                url,
+                row_factory=dict_row,
+                connect_timeout=int(timeout),
+            )
+            # Se fija en la sesión porque `options` del DSN no siempre llega.
+            with raw.cursor() as cursor:
+                cursor.execute("SET statement_timeout = '60s'")
+                cursor.execute("SET lock_timeout = '15s'")
+            raw.commit()
         except Exception as exc:  # noqa: BLE001
             # Un mensaje útil: el fallo más común es la contraseña sin escapar.
             raise RuntimeError(
