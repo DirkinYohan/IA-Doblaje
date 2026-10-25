@@ -123,3 +123,5 @@ data/cache/*
 data/mail/*
 data/*.sqlite
 data/*.db
+# Sandbox de las pruebas: rutas de datos aisladas (video, salidas, temporales)
+tests/.sandbox/

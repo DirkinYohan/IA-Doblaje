@@ -7,6 +7,7 @@ No hay fixtures de modelos IA, audio sintetico, etc. esos se agregan en T04+.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -41,6 +42,17 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ["IA_DB_BACKEND"] = "sqlite"
     os.environ.pop("IA_DATABASE_URL", None)
     os.environ.pop("DATABASE_URL", None)
+    # Y tampoco deben subir archivos al bucket real del almacenamiento.
+    os.environ["IA_STORAGE_BACKEND"] = "local"
+
+    # Las rutas de datos también van a un directorio de pruebas: sin esto la
+    # suite deja vídeos y miniaturas en data/input del proyecto.
+    sandbox = PROJECT_ROOT / "tests" / ".sandbox"
+    if sandbox.exists():
+        shutil.rmtree(sandbox, ignore_errors=True)
+    os.environ["DATA_INPUT_DIR"] = str(sandbox / "input")
+    os.environ["DATA_OUTPUT_DIR"] = str(sandbox / "output")
+    os.environ["DATA_TEMP_DIR"] = str(sandbox / "temporary")
 
     # Crear directorios de trabajo si no existen
     for directory in (DATA_INPUT_DIR, DATA_OUTPUT_DIR, DATA_TEMP_DIR, MODELS_DIR):
