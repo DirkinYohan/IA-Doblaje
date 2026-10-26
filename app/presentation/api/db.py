@@ -146,34 +146,103 @@ class Connection:
     El resto del código usa `execute`, `executescript` y `commit`, y lee filas
     por nombre de columna. Esta clase garantiza que ambas cosas funcionen igual
     sobre los dos motores.
+
+    Además, en PostgreSQL se reabre sola. Una única conexión compartida es un
+    punto frágil: el pooler de Supabase cierra las sesiones inactivas y, cuando
+    eso pasaba, TODAS las peticiones devolvían 500 («the connection is closed»)
+    hasta reiniciar la API.
     """
 
-    def __init__(self, raw: Any, backend: str) -> None:
+    def __init__(self, raw: Any, backend: str, reconnect: Any = None) -> None:
         self.raw = raw
         self.backend = backend
+        self._reconnect = reconnect
+        self._reconnect_lock = threading.Lock()
+        self.reconnects = 0
+
+    # -- salud de la conexión -------------------------------------------
+    def _broken(self) -> bool:
+        if self.backend != "postgres":
+            return False
+        raw = self.raw
+        return (
+            raw is None
+            or bool(getattr(raw, "closed", False))
+            or bool(getattr(raw, "broken", False))
+        )
+
+    @staticmethod
+    def _is_disconnect(exc: BaseException) -> bool:
+        """¿El error significa que la conexión ya no sirve?"""
+        text = f"{type(exc).__name__}: {exc}".lower()
+        señales = (
+            "connection is closed",
+            "server closed the connection",
+            "consuming input failed",
+            "terminating connection",
+            "connection lost",
+            "connection already closed",
+            "ssl connection has been closed",
+        )
+        return isinstance(exc, OSError) or any(s in text for s in señales)
+
+    def _reopen(self) -> None:
+        if self._reconnect is None:
+            raise RuntimeError(
+                "la conexión se cerró y este objeto no puede reabrirla"
+            )
+        with self._reconnect_lock:
+            if self._broken():
+                self.raw = self._reconnect()
+                self.reconnects += 1
 
     # -- ejecución -----------------------------------------------------
+    def _execute_pg(self, sql: str, params: tuple[Any, ...]) -> Any:
+        cursor = self.raw.cursor()
+        cursor.execute(_translate(sql), params)
+        return cursor
+
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
-        if self.backend == "postgres":
-            cursor = self.raw.cursor()
-            cursor.execute(_translate(sql), params)
-            return cursor
-        return self.raw.execute(sql, params)
+        if self.backend != "postgres":
+            return self.raw.execute(sql, params)
+        try:
+            return self._execute_pg(sql, params)
+        except Exception as exc:  # noqa: BLE001
+            if not self._is_disconnect(exc):
+                raise
+            # La sesión murió: se reabre y se repite UNA vez.
+            self._reopen()
+            return self._execute_pg(sql, params)
 
     def executescript(self, script: str) -> Any:
-        if self.backend == "postgres":
+        if self.backend != "postgres":
+            return self.raw.executescript(script)
+        statements = [s for s in script.split(";") if s.strip()]
+
+        def _run() -> Any:
             cursor = self.raw.cursor()
-            for statement in script.split(";"):
-                if statement.strip():
-                    cursor.execute(statement)
+            for statement in statements:
+                cursor.execute(statement)
             return cursor
-        return self.raw.executescript(script)
+
+        try:
+            return _run()
+        except Exception as exc:  # noqa: BLE001
+            if not self._is_disconnect(exc):
+                raise
+            self._reopen()
+            return _run()
 
     # -- transacción y ciclo de vida ------------------------------------
     def commit(self) -> None:
+        # Sobre una sesión ya cerrada, commit sólo produciría otro 500.
+        if self.backend == "postgres" and self._broken():
+            return
         self.raw.commit()
 
     def rollback(self) -> None:
+        if self.backend == "postgres" and self._broken():
+            return
         self.raw.rollback()
 
     def close(self) -> None:
@@ -181,6 +250,30 @@ class Connection:
 
     def __repr__(self) -> str:
         return f"<Connection backend={self.backend}>"
+
+
+def _open_postgres(url: str, timeout: float) -> Any:
+    """Abre una sesión de PostgreSQL con los timeouts ya fijados."""
+    import psycopg
+    from psycopg.rows import dict_row
+
+    raw = psycopg.connect(
+        url,
+        row_factory=dict_row,
+        connect_timeout=int(timeout),
+        # Mantener viva la sesión reduce los cierres por inactividad del pooler.
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
+    # `statement_timeout` es imprescindible: sin él una consulta que el servidor
+    # no responde cuelga el hilo del worker para siempre.
+    with raw.cursor() as cursor:
+        cursor.execute("SET statement_timeout = '60s'")
+        cursor.execute("SET lock_timeout = '15s'")
+    raw.commit()
+    return raw
 
 
 def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
@@ -192,28 +285,14 @@ def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
     url = database_url()
     if backend_name() == "postgres" and url.startswith(POSTGRES_SCHEMES):
         try:
-            import psycopg
-            from psycopg.rows import dict_row
+            import psycopg  # noqa: F401
         except ImportError as exc:  # pragma: no cover - depende del entorno
             raise RuntimeError(
                 "IA_DATABASE_URL apunta a PostgreSQL pero falta el driver. "
                 'Instálalo con: pip install "psycopg[binary]"'
             ) from exc
         try:
-            # `statement_timeout` es imprescindible: sin él una consulta que el
-            # servidor no responde (o un bloqueo del pooler) cuelga el hilo del
-            # worker para siempre, y con él la limpieza de temporales y todos
-            # los trabajos siguientes.
-            raw = psycopg.connect(
-                url,
-                row_factory=dict_row,
-                connect_timeout=int(timeout),
-            )
-            # Se fija en la sesión porque `options` del DSN no siempre llega.
-            with raw.cursor() as cursor:
-                cursor.execute("SET statement_timeout = '60s'")
-                cursor.execute("SET lock_timeout = '15s'")
-            raw.commit()
+            raw = _open_postgres(url, timeout)
         except Exception as exc:  # noqa: BLE001
             # Un mensaje útil: el fallo más común es la contraseña sin escapar.
             raise RuntimeError(
@@ -221,7 +300,7 @@ def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
                 "Revisa la URL: los caracteres especiales de la contraseña deben ir "
                 "percent-encoded (@ → %40, # → %23, / → %2F)."
             ) from exc
-        return Connection(raw, "postgres")
+        return Connection(raw, "postgres", reconnect=lambda: _open_postgres(url, timeout))
 
     path = Path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
