@@ -43,9 +43,13 @@ class FFmpegSegmentReader:
         sample_rate: int = SAMPLE_RATE,
         timeout_s: int = 300,
     ) -> None:
-        self.path = Path(media_path)
-        if not self.path.is_file():
-            raise AudioExtractionError(f"medio original no encontrado: {self.path!s}")
+        # Acepta una URL (p. ej. la firmada de Storage): FFmpeg lee por rangos
+        # y no hace falta descargar el archivo entero antes de empezar.
+        self.source = str(media_path)
+        self.remote = self.source.startswith(("http://", "https://"))
+        self.path = None if self.remote else Path(media_path)
+        if not self.remote and (self.path is None or not self.path.is_file()):
+            raise AudioExtractionError(f"medio original no encontrado: {self.source}")
         if not ffmpeg_bin:
             raise AudioExtractionError("FFmpeg no disponible para leer el audio por segmentos")
         self.ffmpeg_bin = ffmpeg_bin
@@ -55,7 +59,8 @@ class FFmpegSegmentReader:
         probed = self._probe_duration_ms() if ffprobe_bin else 0
         self.duration_ms = int(probed or duration_ms or 0)
         if self.duration_ms <= 0:
-            raise AudioExtractionError(f"no se pudo medir la duración de {self.path.name}")
+            name = "el medio remoto" if self.remote else (self.path.name if self.path else "el medio")
+            raise AudioExtractionError(f"no se pudo medir la duración de {name}")
         self.total_frames = int(self.duration_ms * self.sample_rate / 1000)
 
     def _probe_duration_ms(self) -> int:
@@ -63,7 +68,7 @@ class FFmpegSegmentReader:
         command = [
             self.ffprobe_bin, "-v", "error", "-select_streams", "a:0",
             "-show_entries", "stream=duration:format=duration",
-            "-of", "json", str(self.path),
+            "-of", "json", self.source,
         ]
         try:
             done = subprocess.run(
@@ -75,7 +80,7 @@ class FFmpegSegmentReader:
             return 0
         streams = payload.get("streams") or []
         if not streams:
-            raise AudioExtractionError(f"{self.path.name} no tiene pista de audio")
+            raise AudioExtractionError("el medio no tiene pista de audio")
         for raw in (streams[0].get("duration"), (payload.get("format") or {}).get("duration")):
             try:
                 value = float(raw)
@@ -96,7 +101,7 @@ class FFmpegSegmentReader:
         command = [
             self.ffmpeg_bin, "-hide_banner", "-nostdin", "-loglevel", "error",
             "-ss", f"{start / 1000:.3f}",
-            "-i", str(self.path),
+            "-i", self.source,
             "-t", f"{(stop - start) / 1000:.3f}",
             "-map", "0:a:0", "-vn", "-sn", "-dn",
             "-ac", "1", "-ar", str(self.sample_rate),

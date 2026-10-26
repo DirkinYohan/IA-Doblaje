@@ -161,6 +161,44 @@ def release(path: Path | None, temp_dir: Path) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Copia pendiente de procesar
+# ---------------------------------------------------------------------------
+# Al subir un vídeo el archivo ya está en disco; descargarlo otra vez desde
+# Storage para el primer trabajo añadía entre 9 y 100 s de espera (la red a
+# Supabase es muy variable). Se conserva esa copia hasta que el trabajo
+# termina y entonces se borra: no es almacenamiento permanente.
+def pending_path(temp_dir: Path, project_id: str, suffix: str = "") -> Path:
+    return Path(temp_dir) / "pending" / f"{project_id}{suffix}"
+
+
+def find_pending(temp_dir: Path, project_id: str) -> Path | None:
+    folder = Path(temp_dir) / "pending"
+    if not folder.is_dir():
+        return None
+    for candidate in folder.glob(f"{project_id}.*"):
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+    return None
+
+
+def drop_pending(temp_dir: Path, project_id: str) -> None:
+    folder = Path(temp_dir) / "pending"
+    if not folder.is_dir():
+        return
+    for candidate in folder.glob(f"{project_id}.*"):
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def purge_pending(temp_dir: Path) -> None:
+    folder = Path(temp_dir) / "pending"
+    if folder.is_dir():
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def purge_temp(temp_dir: Path, *, attempts: int = 1, interval: float = 0.0) -> bool:
     """Vacía los temporales de medios de una pasada.
 

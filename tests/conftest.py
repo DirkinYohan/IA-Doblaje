@@ -44,6 +44,8 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.pop("DATABASE_URL", None)
     # Y tampoco deben subir archivos al bucket real del almacenamiento.
     os.environ["IA_STORAGE_BACKEND"] = "local"
+    # Cargar Whisper y M2M100 en cada prueba haría la suite lentísima.
+    os.environ["IA_PRELOAD_MODELS"] = "0"
 
     # Las rutas de datos también van a un directorio de pruebas: sin esto la
     # suite deja vídeos y miniaturas en data/input del proyecto.
