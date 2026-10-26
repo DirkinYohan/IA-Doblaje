@@ -28,16 +28,13 @@ from pydantic.functional_validators import BeforeValidator
 
 
 class TranslationLanguage(str, Enum):
-    """Los 8 idiomas oficiales de T15."""
+    """Idiomas oficiales soportados."""
 
     ES = "es"
     EN = "en"
     FR = "fr"
-    DE = "de"
     IT = "it"
     PT = "pt"
-    JA = "ja"
-    ZH = "zh"
 
     @property
     def display_name(self) -> str:
@@ -48,11 +45,8 @@ _LANGUAGE_NAMES: dict["TranslationLanguage", str] = {
     TranslationLanguage.ES: "Español",
     TranslationLanguage.EN: "Inglés",
     TranslationLanguage.FR: "Francés",
-    TranslationLanguage.DE: "Alemán",
     TranslationLanguage.IT: "Italiano",
     TranslationLanguage.PT: "Portugués",
-    TranslationLanguage.JA: "Japonés",
-    TranslationLanguage.ZH: "Chino mandarín",
 }
 
 TRANSLATION_LANGUAGE_CODES: frozenset[str] = frozenset(
