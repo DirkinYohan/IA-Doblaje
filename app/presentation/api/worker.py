@@ -278,6 +278,47 @@ def _run_job(conn: Any, job_id: str) -> None:
         # Los medios descargados de Storage son temporales: se borran siempre,
         # haya terminado bien, mal o cancelado. Nada permanente en disco.
         _purge_media_temp()
+        # La copia local que dejó la subida ya no hace falta una vez procesada.
+        try:
+            media_store.drop_pending(
+                Path(str(get_settings().paths.data_temp_dir)), str(project["id"])
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def preload_models() -> None:
+    """Carga Whisper y M2M100 en segundo plano al arrancar la API.
+
+    Sin esto, el primer trabajo pagaba ~20 s de carga del ASR y ~15 s del
+    traductor dentro del camino crítico, justo antes del primer subtítulo. La
+    carga se hace una vez, al levantar el servidor, y el usuario no la espera.
+    """
+    try:
+        threading.Thread(target=_preload_models_sync, name="preload-models", daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _preload_models_sync() -> None:
+    """Deja M2M100 cargado antes del primer trabajo.
+
+    El traductor guarda su modelo en una caché de módulo (`_load_once`), así que
+    precargarlo aquí sí lo reutiliza el primer trabajo: sin esto, la primera
+    traducción pagaba ~15-20 s de carga y el subtítulo en el idioma pedido
+    llegaba mucho después que el original.
+
+    Whisper no se precarga porque cada trabajo construye su propio adaptador y
+    el modelo no se comparte; cargarlo aquí no ahorraría nada.
+    """
+    try:
+        from app.infrastructure.translation.m2m100_translation_adapter import (
+            M2M100TranslatorAdapter,
+        )
+
+        M2M100TranslatorAdapter(settings_getter=get_settings).load()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _purge_media_temp() -> None:
@@ -372,8 +413,9 @@ def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
     remote = media_store.is_remote(project["media_path"])
     local_media: Path | None = None
     try:
-        local_media = media_store.materialize(
-            project["media_path"], temp_root, label=job_id
+        # Se prefiere la copia que dejó la subida: evita descargar de Storage.
+        local_media = media_store.find_pending(temp_root, str(project["id"])) or (
+            media_store.materialize(project["media_path"], temp_root, label=job_id)
         )
     except Exception as exc:  # noqa: BLE001
         db.run(
@@ -517,6 +559,8 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
     targets = [t.strip().lower() for t in targets_raw.split(",") if t.strip()]
     source = str(project["source_language"] or "und").lower()
 
+
+
     _persist(*tracker.set_progress("PREPARING", 1))
     db.run(conn, "UPDATE projects SET status='PROCESSING' WHERE id=?", (project["id"],))
 
@@ -632,11 +676,18 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
             # informará del error con su propia causa.
             _ = exc
 
-    # La traducción se precarga EN PARALELO con la carga de Whisper y la
-    # detección de idioma: es lo más lento del arranque (~15 s).
-    threading.Thread(
-        target=_warm_translator, name=f"warm-{job_id[:8]}", daemon=True
-    ).start()
+    # La precarga de M2M100 (1,8 GB, ~15 s) se lanza después del PRIMER subtítulo,
+    # no al arrancar: compitiendo con Whisper por la CPU retrasaba justo el tramo
+    # que el usuario está esperando. A partir del segundo tramo ya va en paralelo.
+    warm_started = {"value": False}
+
+    def _start_warm_once() -> None:
+        if warm_started["value"]:
+            return
+        warm_started["value"] = True
+        threading.Thread(
+            target=_warm_translator, name=f"warm-{job_id[:8]}", daemon=True
+        ).start()
 
     # --- Idioma de origen ----------------------------------------------------
     # Si el proyecto lo declara no se detecta. Si no, Whisper lo identifica con
@@ -849,7 +900,10 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
         )
 
         # 2) Traducciones: en su propio hilo, sin bloquear el siguiente tramo.
+        #    La precarga del modelo arranca aquí, cuando el original ya está
+        #    publicado y el usuario tiene algo que leer.
         if any(target != source for target in targets):
+            _start_warm_once()
             translation_queue.put(source_cues)
 
     try:
@@ -917,16 +971,24 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
 def _open_segment_reader(project: Any, temp_dir: Path) -> Any:
     """Lector de audio por tramos sobre el vídeo ORIGINAL (sólo lectura).
 
-    Si el original vive en Storage, se descarga antes a un temporal. Ese
-    temporal lo borra `_run_job` al terminar: aquí no se libera porque el
-    lector lo necesita durante todo el trabajo.
+    El original se materializa en disco antes de empezar. Se probó a pasarle a
+    FFmpeg la URL firmada para leer sólo los tramos necesarios, pero medir la
+    duración sobre HTTP obliga a recorrer el archivo remoto y el arranque pasó
+    de 8,7 s a 63,6 s: descargar una vez y leer en local es bastante más rápido.
+    El temporal lo borra `_run_job` al terminar.
     """
     from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
     from app.infrastructure.audio.ffmpeg_segment_reader import FFmpegSegmentReader
 
-    media_path = media_store.materialize(
-        project["media_path"], temp_dir, label=f"reader-{project['id']}"
-    )
+    # Si el vídeo acaba de subirse, su copia local sigue en `pending`: usarla
+    # evita descargarlo de Storage (entre 9 y 100 s según la red).
+    pending = media_store.find_pending(temp_dir, str(project["id"]))
+    if pending is not None:
+        media_path = pending
+    else:
+        media_path = media_store.materialize(
+            project["media_path"], temp_dir, label=f"reader-{project['id']}"
+        )
     if not media_path.is_file():
         raise FileNotFoundError(f"el vídeo original no existe: {media_path!s}")
     resolver = SubprocessFFmpegBinaryResolver()
@@ -937,10 +999,12 @@ def _open_segment_reader(project: Any, temp_dir: Path) -> Any:
     probe_ok, ffprobe_bin, _probe_version = resolver.resolve("ffprobe")
     keys = project.keys() if hasattr(project, "keys") else []
     known = int(project["duration_ms"] or 0) if "duration_ms" in keys else 0
+    # Con la duración ya medida al subir, no hace falta volver a sondear el
+    # archivo: se ahorra un ffprobe completo en cada trabajo.
     return FFmpegSegmentReader(
         media_path,
         ffmpeg_bin=ffmpeg_bin,
-        ffprobe_bin=ffprobe_bin if probe_ok else "",
+        ffprobe_bin=ffprobe_bin if (probe_ok and known <= 0) else "",
         duration_ms=known,
     )
 

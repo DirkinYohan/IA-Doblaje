@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -309,6 +310,7 @@ def create_app() -> FastAPI:
     # deben sobrevivir a un reinicio.
     try:
         media_store.purge_temp(Path(str(settings.paths.data_temp_dir)), attempts=5, interval=0.2)
+        media_store.purge_pending(Path(str(settings.paths.data_temp_dir)))
         uploads = Path(str(settings.paths.data_temp_dir)) / "uploads"
         if uploads.is_dir():
             import shutil as _shutil
@@ -316,6 +318,13 @@ def create_app() -> FastAPI:
             _shutil.rmtree(uploads, ignore_errors=True)
     except Exception:  # noqa: BLE001
         pass
+
+    # Precarga opcional de modelos. Desactivada por defecto: se midió que cargar
+    # M2M100 al arrancar satura la CPU del proceso y la descarga del vídeo pasó
+    # de 8,8 s a 100 s, así que el primer subtítulo llegaba mucho más tarde.
+    # `IA_PRELOAD_MODELS=1` la activa en equipos con CPU de sobra.
+    if os.environ.get("IA_PRELOAD_MODELS", "0") == "1":
+        worker.preload_models()
 
     app.state.worker_enabled = os.environ.get("IA_DISABLE_WORKER") != "1"
     if app.state.worker_enabled:
@@ -645,10 +654,31 @@ def create_app() -> FastAPI:
             except Exception as exc:  # noqa: BLE001
                 target.unlink(missing_ok=True)
                 thumb_temp.unlink(missing_ok=True)
+                # El plan gratuito de Supabase rechaza archivos grandes con 413:
+                # conviene decirlo en claro en vez de mostrar el error crudo.
+                if "413" in str(exc):
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "El almacenamiento rechaza el archivo por tamaño "
+                            "(límite del plan de Supabase). Prueba con un vídeo "
+                            "más ligero o amplía el plan."
+                        ),
+                    ) from exc
                 _raise_engine_error("No se pudo subir el archivo al almacenamiento", exc)
             finally:
-                target.unlink(missing_ok=True)
                 thumb_temp.unlink(missing_ok=True)
+
+            # El archivo ya está en disco: se conserva hasta que el trabajo lo
+            # procese, para no volver a descargarlo de Storage. Se borra al
+            # terminar (o al arrancar la API si quedó huérfano).
+            try:
+                suffix = target.suffix
+                pending = media_store.pending_path(paths["temp"], project_id, suffix)
+                pending.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(target), str(pending))
+            except Exception:  # noqa: BLE001
+                target.unlink(missing_ok=True)
 
             media_value = media_store.make_uri(
                 os.environ.get("SUPABASE_BUCKET", "media"), media_key
