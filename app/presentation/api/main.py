@@ -23,7 +23,7 @@ from app.presentation.api import db, media_store, worker
 from app.presentation.api.realtime import RealtimeSession, m2m_translator, whisper_transcriber
 from app.presentation.api.security import RateLimiter, hash_password, new_token, token_hash, verify_password
 
-OFFICIAL = {"es", "en", "fr", "de", "it", "pt", "ja", "zh"}
+OFFICIAL = {"es", "en", "fr", "it", "pt"}
 COOKIE = "ia_session"
 # Vida de un ticket de WebSocket: sólo cubre el tiempo de abrir la conexión.
 WS_TICKET_TTL_S = 60
@@ -154,6 +154,45 @@ def _write_thumbnail(media_path: Path, target: Path) -> bool:
             ],
             capture_output=True,
             timeout=120,
+            check=False,
+        )
+        return completed.returncode == 0 and target.is_file() and target.stat().st_size > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _write_storyboard(media_path: Path, target: Path, *, frames: int = 14) -> bool:
+    """Tira de miniaturas del vídeo en una sola imagen (para la línea de tiempo).
+
+    Se genera en el servidor para que el navegador no tenga que decodificar el
+    vídeo ni dibujar frames en un canvas: con el medio en Storage, ese camino
+    queda bloqueado por CORS.
+    """
+    try:
+        from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
+
+        ok, ffmpeg_bin, _ = SubprocessFFmpegBinaryResolver().resolve("ffmpeg")
+        if not ok:
+            return False
+        import subprocess
+
+        count = max(4, min(24, int(frames)))
+        width, height = 176, 99
+        # Una sola imagen con `count` fotogramas en fila.
+        filtro = (
+            f"fps={count}/{max(1.0, _probe_duration_ms(media_path) / 1000):.6f},"
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},tile={count}x1"
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.run(
+            [
+                ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(media_path),
+                "-vf", filtro, "-frames:v", "1", "-q:v", "6", str(target),
+            ],
+            capture_output=True,
+            timeout=180,
             check=False,
         )
         return completed.returncode == 0 and target.is_file() and target.stat().st_size > 0
@@ -822,6 +861,47 @@ def create_app() -> FastAPI:
         if not str(path).startswith(str(root)) or not path.is_file():
             raise HTTPException(status_code=404, detail="Sin miniatura")
         return FileResponse(path, media_type="image/jpeg")
+
+    @app.get("/api/videos/{project_id}/storyboard")
+    def storyboard(
+        project_id: str,
+        frames: int = 14,
+        ia_session: str | None = Cookie(default=None),
+    ) -> FileResponse:
+        """Tira de miniaturas para la línea de tiempo (una sola imagen)."""
+        row = user_from_cookie(ia_session)
+        project = _own_project(conn, project_id, row["id"])
+        media_path = project["media_path"]
+
+        count = max(4, min(24, int(frames)))
+        cached = paths["temp"] / "storyboards" / f"{project_id}-{count}.jpg"
+        if cached.is_file() and cached.stat().st_size > 0:
+            return FileResponse(cached, media_type="image/jpeg")
+
+        remote = media_store.is_remote(media_path)
+        local: Path | None = None
+        try:
+            if remote:
+                local = media_store.materialize(
+                    media_path, paths["temp"], label=f"story-{project_id}"
+                )
+            else:
+                candidate = Path(str(media_path)).resolve()
+                if not candidate.is_file():
+                    raise HTTPException(status_code=404, detail="Archivo no encontrado")
+                local = candidate
+
+            if not _write_storyboard(local, cached, frames=count):
+                raise HTTPException(status_code=503, detail="No se pudo generar la tira")
+        finally:
+            if remote:
+                media_store.release(local, paths["temp"])
+
+        return FileResponse(
+            cached,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
 
     @app.post("/api/jobs")
     async def create_job(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:

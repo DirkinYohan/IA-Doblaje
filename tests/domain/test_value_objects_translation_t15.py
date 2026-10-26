@@ -51,21 +51,19 @@ def _seg(idx: int = 0, start: int = 0, end: int = 1000) -> TranslationSegment:
 
 
 class TestTranslationLanguage:
-    def test_8_idiomas(self):
+    def test_idiomas_oficiales(self):
         codes = {lang.value for lang in TranslationLanguage}
-        assert codes == {"es", "en", "fr", "de", "it", "pt", "ja", "zh"}
+        assert codes == {"es", "en", "fr", "it", "pt"}
 
     def test_constantes_coinciden(self):
-        assert TRANSLATION_LANGUAGE_CODES == {
-            "es", "en", "fr", "de", "it", "pt", "ja", "zh"
-        }
+        assert TRANSLATION_LANGUAGE_CODES == {"es", "en", "fr", "it", "pt"}
 
     def test_display_names(self):
         assert TranslationLanguage.ES.display_name == "Español"
-        assert TranslationLanguage.ZH.display_name == "Chino mandarín"
+        assert TranslationLanguage.PT.display_name == "Portugués"
 
     def test_cada_idioma_valido(self):
-        for code in ("es", "en", "fr", "de", "it", "pt", "ja", "zh"):
+        for code in ("es", "en", "fr", "it", "pt"):
             assert _LangDut(v=code).v == code
 
     @pytest.mark.parametrize("bad", ["xx", "ru", "ko", "und", "", 5, None, True])
