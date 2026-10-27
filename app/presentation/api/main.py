@@ -724,8 +724,18 @@ def create_app() -> FastAPI:
                 _now(), duration_ms, thumb_value, _now(),
             ),
         )
-        # El job queda listo pero NO arranca: el usuario pulsa «Producir».
-        job_id = _create_job(conn, project_id, row["id"], "progressive", start=False)
+        # El procesamiento arranca YA, al terminar la subida: antes el job quedaba
+        # en PENDING hasta pulsar «Producir» y la primera reproducción empezaba
+        # sin nada preparado. El proceso del proyecto (`live`) empieza a leer el
+        # audio desde la copia local de la subida, sin esperar a la cola.
+        # Sin worker (pruebas, despliegues de sólo lectura) no hay quién procese:
+        # el job queda preparado y «Producir» informará del motivo.
+        job_id = _create_job(conn, project_id, row["id"], "progressive", start=app.state.worker_enabled)
+        uploaded = db.one(conn, "SELECT * FROM projects WHERE id=?", (project_id,))
+        if uploaded is not None and app.state.worker_enabled:
+            from app.presentation.api import live
+
+            live.start_for_project(conn, uploaded, job_id=job_id)
         return {"id": project_id, "job_id": job_id, "title": filename, "duration_ms": duration_ms}
 
     @app.get("/api/videos/{project_id}")

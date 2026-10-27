@@ -504,47 +504,31 @@ def _store_cues(conn: Any, project_id: str, output_dir: Path) -> None:
 
 
 def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None:
-    """Produce subtítulos por ventanas y los publica en cuanto están listos.
+    """El job progresivo ES el proceso del proyecto (`live`): se engancha a él.
 
-    Se apoya en los MISMOS adapters que el pipeline completo (VAD, ASR,
-    traducción); lo único distinto es el orden: se consume el audio por tramos
-    y cada tramo se persiste y se emite inmediatamente.
+    Ese proceso arranca en cuanto termina la subida y es el mismo que alimenta
+    al reproductor (prioriza lo que se está viendo y completa el vídeo entero en
+    todos los idiomas). Aquí sólo se espera a que termine y se cierra el job.
+
+    Antes este job ejecutaba OTRA cadena con sus propios modelos, en paralelo con
+    la del reproductor: el vídeo se transcribía dos veces, ambas competían por la
+    CPU y escribían las mismas pistas, y el primer subtítulo llegaba a los ~34 s
+    de subir el vídeo (medido en el job a9c964ea).
     """
-    import time
+    from app.presentation.api import live
 
-    from app.application.use_cases.progressive_transcription import (
-        ProgressiveTranscriber,
-    )
-    from app.core.config import get_settings
+    _ = job
+    runner = live.start_for_project(conn, project, job_id=job_id)
+    cancel_event = _CANCEL.get(job_id)
+    while not runner.done.wait(0.5):
+        if cancel_event is not None and cancel_event.is_set():
+            runner.stop()
+            runner.done.wait(10)
+            return
 
-    tracker = ProgressTracker()
-    try:
-        history: list[dict[str, Any]] = json.loads(str(job["stage_history"] or "[]"))
-    except (json.JSONDecodeError, KeyError, TypeError):
-        history = []
-    if not isinstance(history, list):
-        history = []
-
-    def _persist(status: str, percent: int, stage: str) -> None:
-        history.append({"stage": stage, "status": status, "progress": percent, "at": _utcnow()})
-        db.run(
-            conn,
-            "UPDATE jobs SET status=?, progress=?, stage=?, stage_history=?, updated_at=? "
-            "WHERE id=? AND status!='CANCELLED'",
-            (status, percent, stage, json.dumps(history, ensure_ascii=False), _utcnow(), job_id),
-        )
-        publish(
-            job_id,
-            {
-                "type": "processing_progress",
-                "job_id": job_id,
-                "status": status,
-                "stage": stage,
-                "progress": percent,
-            },
-        )
-
-    def _fail(message: str) -> None:
+    tracker = runner.tracker or live.JobTracker(conn, job_id)
+    if runner.error or runner.subtitler is None:
+        message = runner.error or "no se pudo iniciar el procesamiento"
         db.run(
             conn,
             "UPDATE jobs SET status='FAILED', error=?, stage='FAILED', updated_at=? "
@@ -553,407 +537,25 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
         )
         db.run(conn, "UPDATE projects SET status='FAILED' WHERE id=?", (project["id"],))
         publish(job_id, {"type": "processing_failed", "job_id": job_id, "error": message})
-
-    settings = get_settings()
-    targets_raw = str(project["target_languages"] or "")
-    targets = [t.strip().lower() for t in targets_raw.split(",") if t.strip()]
-    source = str(project["source_language"] or "und").lower()
-
-
-
-    _persist(*tracker.set_progress("PREPARING", 1))
-    db.run(conn, "UPDATE projects SET status='PROCESSING' WHERE id=?", (project["id"],))
-
-    # --- 1) Audio por segmentos (el vídeo original NO se toca) -------------
-    # No se extrae ni se normaliza el audio COMPLETO antes de empezar: cada
-    # ventana se decodifica del original justo antes de transcribirla. Así el
-    # primer subtítulo llega en segundos aunque el vídeo dure horas (antes había
-    # que esperar al loudnorm a dos pasadas + VAD + LID del archivo entero).
-    _persist(*tracker.set_progress("EXTRACTING_AUDIO", 3))
-    try:
-        reader = _open_segment_reader(project, Path(str(settings.paths.data_temp_dir)))
-    except Exception as exc:  # noqa: BLE001
-        _fail(f"no se pudo leer el audio del vídeo: {exc}")
-        return
-    duration_ms = int(reader.duration_ms)
-
-    # --- 2) ASR + traducción ---------------------------------------------
-    from app.core.profile_loader import load_asr_profile, resolve_compute_type
-    from app.domain.value_objects.asr import AsrThresholds
-    from app.infrastructure.audio.faster_whisper_asr_adapter import (
-        FasterWhisperSmallASRAdapter,
-    )
-
-    profile_name = str(getattr(settings.processing.profile, "value", settings.processing.profile))
-    spec = load_asr_profile(profile_name, settings.paths.configs_dir)
-    requested = str(getattr(settings.processing.device, "value", settings.processing.device)).lower()
-    device = "cpu"
-    if requested in {"auto", "cuda", "mps"} and not bool(
-        getattr(settings.processing, "force_cpu", False)
-    ):
-        try:
-            import torch
-
-            if requested in {"auto", "cuda"} and torch.cuda.is_available():
-                device = "cuda"
-            elif requested in {"auto", "mps"} and getattr(torch.backends, "mps", None):
-                if torch.backends.mps.is_available():
-                    device = "mps"
-        except Exception:  # noqa: BLE001
-            device = "cpu"
-    compute_type, _note = resolve_compute_type(spec.compute_type, device)
-
-    asr_adapter = FasterWhisperSmallASRAdapter(
-        compute_type=compute_type,
-        model_folder=spec.model_folder,
-        device_resolver=lambda: device,
-    )
-    thresholds = AsrThresholds(
-        beam_size=int(spec.beam_size),
-        word_timestamps=bool(spec.word_timestamps),
-        chunk_by_vad=bool(spec.chunk_by_vad),
-    )
-
-    translator_holder: dict[str, Any] = {}
-    translator_lock = threading.Lock()
-
-    def _translator() -> Any:
-        """Adaptador de traducción (uno por trabajo, creado una sola vez)."""
-        with translator_lock:
-            if "adapter" not in translator_holder:
-                from app.infrastructure.translation.m2m100_translation_adapter import (
-                    M2M100TranslatorAdapter,
-                )
-
-                translator_holder["adapter"] = M2M100TranslatorAdapter(
-                    settings_getter=lambda: settings,
-                    max_length=int(settings.translation.max_length),
-                    num_beams=int(settings.translation.num_beams),
-                    do_sample=bool(settings.translation.do_sample),
-                )
-            return translator_holder["adapter"]
-
-    def _translate(texts: list[str], target: str) -> list[str]:
-        if not texts:
-            return []
-        from app.domain.value_objects.translation import TranslationLanguageCode
-
-        adapter = _translator()
-        # El modelo de traducción (M2M100 418M, ~1,8 GB) no es reentrante: se
-        # serializa para que precarga y traducción no coincidan.
-        with translator_lock:
-            return adapter.translate_batch(
-                texts,
-                source_language=TranslationLanguageCode(source),
-                target_language=TranslationLanguageCode(target),
-            )
-
-    def _warm_translator() -> None:
-        """Precarga M2M100 en segundo plano mientras se extrae el audio.
-
-        La carga del modelo es lo más caro del arranque (~15 s). Hacerlo en
-        paralelo con la extracción evita que el usuario espere de más antes del
-        primer subtítulo.
-        """
-        try:
-            from app.domain.value_objects.translation import TranslationLanguageCode
-
-            adapter = _translator()
-            # Con el idioma aún sin detectar se precarga con un par cualquiera:
-            # lo caro es cargar los pesos, no el par concreto.
-            warm_source = source if source not in {"", "und"} else "en"
-            first = next((t for t in targets if t != warm_source), "es")
-            if first == warm_source:
-                first = "fr" if warm_source == "es" else "es"
-            with translator_lock:
-                adapter.translate(
-                    source_text="ok",
-                    source_language=TranslationLanguageCode(warm_source),
-                    target_language=TranslationLanguageCode(first),
-                )
-        except Exception as exc:  # noqa: BLE001
-            # La precarga es una optimización: si falla, la traducción real
-            # informará del error con su propia causa.
-            _ = exc
-
-    # La precarga de M2M100 (1,8 GB, ~15 s) se lanza después del PRIMER subtítulo,
-    # no al arrancar: compitiendo con Whisper por la CPU retrasaba justo el tramo
-    # que el usuario está esperando. A partir del segundo tramo ya va en paralelo.
-    warm_started = {"value": False}
-
-    def _start_warm_once() -> None:
-        if warm_started["value"]:
-            return
-        warm_started["value"] = True
-        threading.Thread(
-            target=_warm_translator, name=f"warm-{job_id[:8]}", daemon=True
-        ).start()
-
-    # --- Idioma de origen ----------------------------------------------------
-    # Si el proyecto lo declara no se detecta. Si no, Whisper lo identifica con
-    # los primeros tramos con voz (segundos), no con el archivo entero.
-    if source in {"", "und"}:
-        _persist(*tracker.set_progress("ANALYZING_AUDIO", 6))
-        try:
-            detected_language = _detect_language_from_segments(asr_adapter, reader)
-        except Exception:  # noqa: BLE001 - sin idioma, Whisper detecta por ventana
-            detected_language = ""
-        if detected_language:
-            source = detected_language
-            db.run(
-                conn,
-                "UPDATE projects SET source_language=? WHERE id=?",
-                (detected_language, project["id"]),
-            )
-
-    # Estado acumulado de cues por idioma.
-    cues_by_language: dict[str, list[dict[str, Any]]] = {source: []}
-    for target in targets:
-        cues_by_language.setdefault(target, [])
-    next_index: dict[str, int] = {code: 1 for code in cues_by_language}
-    # Errores de traducción acumulados: determinan si el trabajo es PARTIAL.
-    translation_errors: list[str] = []
-
-    def _persist_language(code: str) -> int:
-        """Guarda la pista completa del idioma. Devuelve el total de cues."""
-        cues = cues_by_language[code]
-        db.run(
-            conn,
-            """
-            INSERT INTO subtitles (project_id, language, cues_json, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(project_id, language) DO UPDATE SET
-                cues_json=excluded.cues_json, updated_at=excluded.updated_at
-            """,
-            (project["id"], code, json.dumps(cues, ensure_ascii=False), _utcnow()),
-        )
-        return len(cues)
-
-    cancel_event = _CANCEL.get(job_id)
-    transcriber = ProgressiveTranscriber(
-        asr=asr_adapter,
-        vad=object(),
-        language=None if source in {"", "und"} else source,
-        # Ventanas de 15 s: el ASR tarda menos por tramo y los subtítulos
-        # llegan más a menudo (con 30 s la espera entre lotes era el doble).
-        window_ms=15_000,
-        overlap_ms=1_000,
-        # La primera ventana es corta para que el primer subtítulo aparezca en
-        # segundos, no tras medio minuto de audio.
-        first_window_ms=6_000,
-    )
-
-    # --- Traducción en segundo plano ---------------------------------------
-    # El idioma original NO espera a las traducciones. Antes `_on_cues` traducía
-    # a todos los idiomas antes de emitir nada, así que la primera ventana podía
-    # estar lista a los 11 s y el primer subtítulo no aparecer hasta los 33 s
-    # (lo que M2M100 tarda en cargar). Ahora se publica el original en cuanto
-    # existe y cada traducción llega cuando está lista.
-    translation_queue: _queue_module.Queue = _queue_module.Queue()
-    translation_lock = threading.Lock()
-
-    def _translation_worker() -> None:
-        while True:
-            item = translation_queue.get()
-            try:
-                if item is None:
-                    return
-                window_cues = item
-                texts = [str(cue.text) for cue in window_cues]
-                for target in targets:
-                    if target == source:
-                        continue
-                    try:
-                        translated = _translate(texts, target)
-                    except Exception as exc:  # noqa: BLE001
-                        # Una traducción fallida NO puede pasar por éxito
-                        # silencioso: se registra y el trabajo será PARTIAL.
-                        message = f"{target}: {exc}"
-                        with translation_lock:
-                            if message not in translation_errors:
-                                translation_errors.append(message)
-                        publish(
-                            job_id,
-                            {
-                                "type": "translation_failed",
-                                "job_id": job_id,
-                                "language": target,
-                                "error": str(exc),
-                            },
-                        )
-                        continue
-
-                    batch: list[dict[str, Any]] = []
-                    with translation_lock:
-                        for cue, text in zip(window_cues, translated, strict=False):
-                            cues_by_language.setdefault(target, []).append(
-                                {
-                                    "index": next_index[target],
-                                    "start_ms": int(cue.start_ms),
-                                    "end_ms": int(cue.end_ms),
-                                    "text": str(text),
-                                    "speaker": str(getattr(cue, "speaker", "") or ""),
-                                    "language": target,
-                                    "state": "final",
-                                }
-                            )
-                            next_index[target] += 1
-                            batch.append(
-                                {
-                                    "start_ms": int(cue.start_ms),
-                                    "end_ms": int(cue.end_ms),
-                                    "text": str(text),
-                                }
-                            )
-                        total = _persist_language(target)
-
-                    if batch:
-                        # Un evento por idioma: el reproductor añade la pista
-                        # sin tocar las que ya mostraba.
-                        publish(
-                            job_id,
-                            {
-                                "type": "subtitle_created",
-                                "job_id": job_id,
-                                "project_id": project["id"],
-                                "covered_ms": int(window_cues[-1].end_ms),
-                                "duration_ms": duration_ms,
-                                "progress": tracker.percent,
-                                "source_language": source,
-                                "cues": [],
-                                "cues_by_language": {target: batch},
-                                "totals": {target: total},
-                            },
-                        )
-            finally:
-                translation_queue.task_done()
-
-    threading.Thread(
-        target=_translation_worker, name=f"i18n-{job_id[:8]}", daemon=True
-    ).start()
-
-    def _on_cues(window: Any) -> None:
-        """Cada ventana: publicar el original YA y encolar sus traducciones."""
-        if cancel_event is not None and cancel_event.is_set():
-            return
-        source_cues = list(window.cues)
-        if not source_cues:
-            return
-
-        for cue in source_cues:
-            cues_by_language.setdefault(source, []).append(
-                {
-                    "index": next_index[source],
-                    "start_ms": int(cue.start_ms),
-                    "end_ms": int(cue.end_ms),
-                    "text": str(cue.text),
-                    "speaker": str(getattr(cue, "speaker", "") or ""),
-                    "language": source,
-                    "state": "final",
-                }
-            )
-            next_index[source] += 1
-
-        # 1) Original: persistir y emitir inmediatamente.
-        total_source = _persist_language(source)
-        source_batch = [
-            {
-                "start_ms": int(cue.start_ms),
-                "end_ms": int(cue.end_ms),
-                "text": str(cue.text),
-            }
-            for cue in source_cues
-        ]
-        covered = int(window.end_ms)
-        if duration_ms > 0:
-            # 10 %..95 % del progreso corresponde al audio ya transcrito.
-            percent = 10 + int(85 * min(1.0, covered / duration_ms))
-        else:
-            percent = max(tracker.percent, 20)
-        # `_persist` deja la etapa en el historial; `set_progress` calcula el %
-        # garantizando que nunca retrocede.
-        _persist(*tracker.set_progress("CUES_READY", percent))
-        db.run(
-            conn,
-            "UPDATE jobs SET last_cue_ms=?, updated_at=? WHERE id=? AND status!='CANCELLED'",
-            (covered, _utcnow(), job_id),
-        )
-        db.run(
-            conn,
-            "UPDATE projects SET status='PARTIALLY_READY' WHERE id=?",
-            (project["id"],),
-        )
-        publish(
-            job_id,
-            {
-                "type": "subtitle_created",
-                "job_id": job_id,
-                "project_id": project["id"],
-                "covered_ms": covered,
-                "duration_ms": duration_ms,
-                "progress": tracker.percent,
-                "source_language": source,
-                "cues": source_batch,
-                "cues_by_language": {source: source_batch},
-                "totals": {source: total_source},
-            },
-        )
-
-        # 2) Traducciones: en su propio hilo, sin bloquear el siguiente tramo.
-        #    La precarga del modelo arranca aquí, cuando el original ya está
-        #    publicado y el usuario tiene algo que leer.
-        if any(target != source for target in targets):
-            _start_warm_once()
-            translation_queue.put(source_cues)
-
-    try:
-        transcriber.process(
-            reader,
-            on_cues=_on_cues,
-            cancel_event=cancel_event,
-        )
-    except PipelineCancelled:
-        _persist("CANCELLED", tracker.percent, "CANCELLED")
-        return
-    except Exception as exc:  # noqa: BLE001
-        _fail(str(exc))
         return
 
-    if cancel_event is not None and cancel_event.is_set():
-        _persist("CANCELLED", tracker.percent, "CANCELLED")
-        translation_queue.put(None)
-        return
-
-    # --- 3) Cierre --------------------------------------------------------
-    # Las traducciones van por detrás del ASR: antes de dar el trabajo por
-    # terminado hay que esperar a que su cola se vacíe, o el último lote se
-    # perdería.
-    if any(target != source for target in targets):
-        translation_queue.join()
-        translation_queue.put(None)
-
-    _persist(*tracker.set_progress("FINALIZING", 97))
-    total_cues = len(cues_by_language.get(source, []))
-    # Si alguna pista pedida quedó vacía, el trabajo NO es un éxito completo.
-    empty_targets = [
-        code for code in targets if code != source and not cues_by_language.get(code)
-    ]
-    for code in empty_targets:
-        note = f"{code}: sin subtítulos traducidos"
-        if note not in translation_errors:
-            translation_errors.append(note)
-
-    project_status = "COMPLETED" if not translation_errors else "PARTIAL"
+    subtitler = runner.subtitler
+    tracker.stage("FINALIZING", 97, "GENERATING_SUBTITLES")
+    errors = [f"{code}: traducción fallida" for code in sorted(subtitler.failed)]
+    for code in subtitler.targets:
+        if code != subtitler.source and code not in subtitler.failed and not subtitler.cues.get(code):
+            if subtitler.cues.get(subtitler.source):
+                errors.append(f"{code}: sin subtítulos traducidos")
+    project_status = "COMPLETED" if not errors else "PARTIAL"
     db.run(conn, "UPDATE projects SET status=? WHERE id=?", (project_status, project["id"]))
-    status, percent, stage = tracker.finish()
-    if translation_errors:
-        stage = "PARTIAL"
-    _persist(status, percent, stage)
+    tracker.stage("COMPLETED" if not errors else "PARTIAL", 100, "COMPLETED")
     db.run(
         conn,
-        "UPDATE jobs SET error=? WHERE id=? AND status!='CANCELLED'",
-        ("; ".join(translation_errors), job_id),
+        "UPDATE jobs SET status='COMPLETED', progress=100, error=?, last_cue_ms=?, updated_at=? "
+        "WHERE id=? AND status!='CANCELLED'",
+        ("; ".join(errors), subtitler.duration_ms, _utcnow(), job_id),
     )
+    log_metrics = {key: round(value, 1) for key, value in runner.metrics.items()}
     publish(
         job_id,
         {
@@ -961,93 +563,12 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
             "job_id": job_id,
             "progress": 100,
             "status": project_status,
-            "languages": sorted(cues_by_language),
-            "cues": total_cues,
-            "errors": translation_errors,
+            "languages": sorted(subtitler.cues),
+            "cues": len(subtitler.cues.get(subtitler.source, [])),
+            "errors": errors,
+            "metrics": log_metrics,
         },
     )
-
-
-def _open_segment_reader(project: Any, temp_dir: Path) -> Any:
-    """Lector de audio por tramos sobre el vídeo ORIGINAL (sólo lectura).
-
-    El original se materializa en disco antes de empezar. Se probó a pasarle a
-    FFmpeg la URL firmada para leer sólo los tramos necesarios, pero medir la
-    duración sobre HTTP obliga a recorrer el archivo remoto y el arranque pasó
-    de 8,7 s a 63,6 s: descargar una vez y leer en local es bastante más rápido.
-    El temporal lo borra `_run_job` al terminar.
-    """
-    from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
-    from app.infrastructure.audio.ffmpeg_segment_reader import FFmpegSegmentReader
-
-    # Si el vídeo acaba de subirse, su copia local sigue en `pending`: usarla
-    # evita descargarlo de Storage (entre 9 y 100 s según la red).
-    pending = media_store.find_pending(temp_dir, str(project["id"]))
-    if pending is not None:
-        media_path = pending
-    else:
-        media_path = media_store.materialize(
-            project["media_path"], temp_dir, label=f"reader-{project['id']}"
-        )
-    if not media_path.is_file():
-        raise FileNotFoundError(f"el vídeo original no existe: {media_path!s}")
-    resolver = SubprocessFFmpegBinaryResolver()
-    # `resolve` devuelve (ok, ruta_o_error, versión).
-    ok, ffmpeg_bin, _version = resolver.resolve("ffmpeg")
-    if not ok:
-        raise RuntimeError(ffmpeg_bin)
-    probe_ok, ffprobe_bin, _probe_version = resolver.resolve("ffprobe")
-    keys = project.keys() if hasattr(project, "keys") else []
-    known = int(project["duration_ms"] or 0) if "duration_ms" in keys else 0
-    # Con la duración ya medida al subir, no hace falta volver a sondear el
-    # archivo: se ahorra un ffprobe completo en cada trabajo.
-    return FFmpegSegmentReader(
-        media_path,
-        ffmpeg_bin=ffmpeg_bin,
-        ffprobe_bin=ffprobe_bin if (probe_ok and known <= 0) else "",
-        duration_ms=known,
-    )
-
-
-# Tramos que se prueban para detectar el idioma: el primero con voz decide.
-LID_PROBE_MS = 30_000
-LID_MAX_PROBES = 4
-LID_MIN_PROBABILITY = 0.5
-
-
-def _detect_language_from_segments(asr_adapter: Any, reader: Any) -> str:
-    """Idioma hablado según Whisper sobre los primeros tramos con voz.
-
-    `transcribe()` de faster-whisper detecta el idioma ANTES de devolver el
-    generador de segmentos (que no se consume), así que cuesta una pasada del
-    encoder por tramo, no una transcripción.
-    """
-    import numpy as np
-
-    model = asr_adapter._get_or_load_model()
-    fallback = ""
-    for probe in range(LID_MAX_PROBES):
-        start = probe * LID_PROBE_MS
-        if start >= reader.duration_ms:
-            break
-        audio = reader.read(start, start + LID_PROBE_MS)
-        if audio.size < reader.sample_rate:
-            continue
-        if float(np.sqrt(np.mean(np.square(audio)))) < 0.005:
-            continue  # silencio o música muy baja: no decide nada
-        _segments, info = model.transcribe(
-            np.asarray(audio, dtype=np.float32),
-            language=None,
-            beam_size=1,
-            vad_filter=False,
-            without_timestamps=True,
-        )
-        code = str(getattr(info, "language", "") or "").lower()
-        probability = float(getattr(info, "language_probability", 0.0) or 0.0)
-        if code and probability >= LID_MIN_PROBABILITY:
-            return code
-        fallback = fallback or code
-    return fallback
 
 
 __all__ = [

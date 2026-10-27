@@ -320,7 +320,11 @@ class TestJobStates:
     def test_el_upload_no_arranca_el_procesamiento(
         self, client: TestClient, auth: dict[str, str], media: dict[str, Path]
     ) -> None:
-        """Subir deja el trabajo listo; producir es una acción aparte."""
+        """Sin worker no hay quién procese: el job queda preparado (PENDING).
+
+        Con worker, subir ARRANCA el procesamiento (ver
+        `test_con_worker_subir_arranca_el_procesamiento`).
+        """
         _login(client, auth["email"])
         with media["video"].open("rb") as handle:
             created = client.post(
@@ -335,6 +339,30 @@ class TestJobStates:
         assert job["mode"] == "progressive"
         project = client.get(f"/api/videos/{created['id']}").json()["video"]
         assert project["status"] == "READY", f"el proyecto debería estar READY ({project['status']})"
+
+    def test_con_worker_subir_arranca_el_procesamiento(
+        self, client: TestClient, auth: dict[str, str], media: dict[str, Path], monkeypatch
+    ) -> None:
+        """El usuario no tiene que pulsar nada: al subir empieza a prepararse."""
+        from app.presentation.api import live, worker
+
+        started: list[tuple[str, str | None]] = []
+        enqueued: list[str] = []
+        monkeypatch.setattr(client.app.state, "worker_enabled", True)
+        monkeypatch.setattr(worker, "enqueue", lambda _conn, job_id: enqueued.append(job_id))
+        monkeypatch.setattr(
+            live, "start_for_project",
+            lambda _conn, project, job_id=None: started.append((str(project["id"]), job_id)),
+        )
+        _login(client, auth["email"])
+        with media["video"].open("rb") as handle:
+            created = client.post(
+                "/api/videos",
+                files={"file": ("auto.mp4", handle, "video/mp4")},
+                data={"source_language": "en", "target_languages": "es"},
+            ).json()
+        assert enqueued == [created["job_id"]], "el job se encola al subir"
+        assert started == [(created["id"], created["job_id"])], "el proceso arranca al subir"
 
     def test_producir_arranca_y_con_worker_apagado_falla_explicito(
         self, client: TestClient, auth: dict[str, str], media: dict[str, Path]
