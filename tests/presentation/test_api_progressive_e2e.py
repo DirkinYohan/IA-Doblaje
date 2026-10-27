@@ -21,8 +21,10 @@ from fastapi.testclient import TestClient
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 FFMPEG = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe"
+# `IA_E2E_SOURCE` permite usar cualquier vídeo local con voz en inglés.
 SOURCE = Path(
-    "data/input/a29937b8-f0ee-40d7-b0d0-2ff63fde9d9d/"
+    os.environ.get("IA_E2E_SOURCE")
+    or "data/input/a29937b8-f0ee-40d7-b0d0-2ff63fde9d9d/"
     "3d12599a-5971-49e6-b426-c1a6ae1efa86/_B1_What_Do_You_Do_on_Weekends.mp4"
 )
 
@@ -249,6 +251,32 @@ class TestProgressiveDelivery:
                 f"solape: {previous['start_ms']}-{previous['end_ms']} y "
                 f"{current['start_ms']}-{current['end_ms']}"
             )
+
+    def test_pistas_con_contrato_de_sincronizacion(
+        self, worker_client: TestClient, prepared: dict[str, str]
+    ) -> None:
+        """Cada pista identifica proyecto, idioma y segmentos en ms del vídeo."""
+        project_id = prepared["project_id"]
+        tracks = worker_client.get(f"/api/subtitles/{project_id}").json()["subtitles"]
+        by_language = {track["language"]: track for track in tracks}
+        assert {"en", "es"} <= set(by_language), list(by_language)
+        clip_ms = 40_000
+        for language, track in by_language.items():
+            assert track["project_id"] == project_id
+            assert track["status"] == "complete"
+            # Ventanas en silencio incluidas: la pista cubre el clip entero.
+            assert track["covered_ms"] >= clip_ms - 1_000, (language, track["covered_ms"])
+            ids = [cue["id"] for cue in track["cues"]]
+            assert len(ids) == len(set(ids)), "identificadores únicos por segmento"
+            for cue in track["cues"]:
+                assert cue["language"] == language
+                assert cue["project_id"] == project_id
+                assert isinstance(cue["start_ms"], int) and isinstance(cue["end_ms"], int)
+                assert 0 <= cue["start_ms"] < cue["end_ms"] <= clip_ms + 1_000
+        # La traducción conserva los tiempos del audio original, segmento a segmento.
+        source_times = [(c["start_ms"], c["end_ms"]) for c in by_language["en"]["cues"]]
+        target_times = [(c["start_ms"], c["end_ms"]) for c in by_language["es"]["cues"]]
+        assert target_times == source_times
 
     def test_consulta_por_rango_para_zonas_procesadas_y_no_procesadas(
         self, worker_client: TestClient, prepared: dict[str, str]

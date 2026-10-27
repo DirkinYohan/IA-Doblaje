@@ -279,3 +279,51 @@ class TestProgressiveTranscriber:
             )
         assert [c.start_ms for c in cues] == sorted(c.start_ms for c in cues)
         assert all(c.end_ms > c.start_ms for c in cues)
+
+
+class TestTimelineOffsets:
+    """Los tiempos de cada fragmento se trasladan a la línea temporal del vídeo."""
+
+    def test_segmento_relativo_a_ventana_se_desplaza_al_video(self) -> None:
+        from app.infrastructure.audio.faster_whisper_asr_adapter import _segment_from_raw
+
+        class _Raw:
+            start = 1.25
+            end = 2.5
+            text = "hola"
+
+        segment = _segment_from_raw(_Raw(), 0, 45_000)
+        assert (segment.start_ms, segment.end_ms) == (46_250, 47_500)
+
+    def test_cues_coinciden_con_la_linea_temporal_original(self, tmp_path: Path) -> None:
+        """Whisper devuelve tiempos RELATIVOS a cada ventana; el adapter suma el
+        desplazamiento. Se simula exactamente eso con diálogos de tiempos
+        conocidos y se exige que los cues coincidan con ellos, no con su
+        posición dentro de la ventana."""
+        from app.infrastructure.audio.faster_whisper_asr_adapter import _segment_from_raw
+
+        dialogue = [(2_000, 3_500, "uno"), (7_200, 8_400, "dos"), (21_000, 23_000, "tres"),
+                    (33_500, 35_000, "cuatro")]
+
+        class _Raw:
+            def __init__(self, start: float, end: float, text: str) -> None:
+                self.start, self.end, self.text = start, end, text
+
+        class _WhisperLike:
+            def transcribe_array(self, audio, *, offset_ms, language, start_index):
+                window_end = offset_ms + int(audio.size * 1000 / 16000)
+                raws = [
+                    _Raw((s - offset_ms) / 1000, (e - offset_ms) / 1000, text)
+                    for s, e, text in dialogue
+                    if offset_ms <= s and e <= window_end
+                ]
+                return [_segment_from_raw(raw, start_index + i, offset_ms) for i, raw in enumerate(raws)]
+
+        reader = ProgressiveAudioWindowReader(_write_wav(tmp_path / "t.wav", 40.0))
+        results = ProgressiveTranscriber(
+            asr=_WhisperLike(), window_ms=15_000, overlap_ms=1_000, first_window_ms=6_000
+        ).process(reader)
+        got = [(cue.start_ms, cue.end_ms, cue.text) for window in results for cue in window.cues]
+        assert got == dialogue
+        # Ventanas sin diálogo también se publican (avanzan la cobertura).
+        assert results[-1].end_ms == reader.duration_ms
