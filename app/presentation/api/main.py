@@ -332,6 +332,23 @@ def create_app() -> FastAPI:
         # Un reinicio no debe dejar jobs eternamente en PROCESSING.
         worker.reconcile_orphans(conn)
 
+    # Modo en vivo: Whisper y el traductor se cargan en cuanto el usuario ve
+    # su lista de proyectos, no cuando pulsa Reproducir. Con CTranslate2 son
+    # unos segundos de CPU, y así el primer subtítulo no espera a la carga.
+    live_warm = {"started": os.environ.get("IA_LIVE_PRELOAD", "1") != "1"}
+
+    def _warm_live_models() -> None:
+        if live_warm["started"]:
+            return
+        live_warm["started"] = True
+        import threading
+
+        from app.presentation.api import live
+
+        threading.Thread(
+            target=live.warm, kwargs={"translation": True}, name="live-preload", daemon=True
+        ).start()
+
     def client_key(request: Request) -> str:
         return request.client.host if request.client else "local"
 
@@ -564,6 +581,7 @@ def create_app() -> FastAPI:
     @app.get("/api/videos")
     def list_videos(ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
         row = user_from_cookie(ia_session)
+        _warm_live_models()
         projects = db.many(conn, "SELECT * FROM projects WHERE user_id=? ORDER BY created_at DESC", (row["id"],))
         # Rellena duración/miniatura de proyectos antiguos (una sola vez).
         projects = [_ensure_project_metadata(conn, paths["input"], p) for p in projects]
@@ -722,6 +740,11 @@ def create_app() -> FastAPI:
     def delete_video(project_id: str, ia_session: str | None = Cookie(default=None)) -> dict[str, bool]:
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
+        from app.presentation.api import live
+
+        running = live.get_runner(project_id)
+        if running is not None:
+            running.stop()
 
         # Al borrar el proyecto también se borra su objeto del almacenamiento.
         media_path = project["media_path"]
@@ -1170,6 +1193,104 @@ def create_app() -> FastAPI:
         if not files:
             raise HTTPException(status_code=404, detail="No hay subtítulos")
         return Response(content=zip_exports(files), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project_id}.zip"'})
+
+    @app.websocket("/api/videos/{project_id}/live")
+    async def live_subtitles(socket: WebSocket, project_id: str) -> None:
+        """Subtítulos progresivos del proyecto, por delante del cabezal.
+
+        Se engancha al proceso ÚNICO del proyecto (lo arranca si no existe y el
+        vídeo aún no está completo). Al conectar envía una instantánea con todo
+        lo generado hasta ahora (`snapshot`, con su `seq`), así que conectarse
+        tarde o reconectar no pierde segmentos; después, cada lote nuevo
+        (`cues`) con su número de secuencia. El cliente informa de la posición
+        del reproductor y del idioma (`{"type": "position", ...}`) para que se
+        procese primero lo que se está viendo.
+        """
+        import asyncio
+
+        from app.presentation.api import live
+
+        await socket.accept()
+        try:
+            user = await asyncio.to_thread(user_from_socket, socket)
+            project = await asyncio.to_thread(_own_project, conn, project_id, user["id"])
+        except HTTPException as exc:
+            code = "unauthorized" if exc.status_code == 401 else "not_found"
+            await socket.send_json({"type": "error", "code": code, "message": str(exc.detail)})
+            await socket.close()
+            return
+
+        job = db.one(
+            conn,
+            "SELECT id, status, mode FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        )
+        if job is not None and _job_is_running(str(job["status"])) and str(job["mode"]) == "full":
+            # El pipeline completo (T01→T15) usa su propia cadena: sus eventos
+            # llegan por el canal del job.
+            await socket.send_json({"type": "busy"})
+            await socket.close()
+            return
+
+        runner = live.get_runner(project_id)
+        if runner is None:
+            existing = await asyncio.to_thread(live.load_existing, conn, project_id)
+            duration = int(project["duration_ms"] or 0)
+            targets = [t for t in str(project["target_languages"] or "").split(",") if t]
+            source = str(project["source_language"] or "")
+            languages = [source] + [t for t in targets if t != source]
+            done = duration > 0 and source not in {"", "und"} and all(
+                code in existing and existing[code][1] >= duration for code in languages
+            )
+            if done:
+                # Vídeo ya procesado: no se relanza nada (cero trabajo duplicado).
+                tracks = {code: [dict(c, id=live.segment_id(code, c["start_ms"], c["end_ms"]))
+                                 for c in cues] for code, (cues, _cov) in existing.items()}
+                covered = {code: [[0, cov]] for code, (_cues, cov) in existing.items()}
+                await socket.send_json({
+                    "type": "snapshot", "seq": 0, "source_language": source, "duration_ms": duration,
+                    "tracks": tracks, "covered": covered, "failed": [], "complete": True,
+                })
+                await socket.send_json({"type": "completed", "seq": 0, "failed": []})
+                try:
+                    while True:
+                        await socket.receive_json()
+                except (WebSocketDisconnect, RuntimeError, ValueError):
+                    return
+            runner = await asyncio.to_thread(
+                live.start_for_project, conn, project,
+                job_id=str(job["id"]) if job is not None and _job_is_running(str(job["status"])) else None,
+            )
+
+        loop = asyncio.get_running_loop()
+        outbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        snapshot, detach = runner.attach(lambda event: loop.call_soon_threadsafe(outbox.put_nowait, event))
+        await socket.send_json(snapshot)
+        if runner.done.is_set():
+            await socket.send_json({"type": "completed", "seq": snapshot["seq"], "failed": snapshot["failed"]})
+
+        async def _sender() -> None:
+            while True:
+                event = await outbox.get()
+                # Lo ya incluido en la instantánea no se repite.
+                if int(event.get("seq", 0)) <= int(snapshot["seq"]):
+                    continue
+                await socket.send_json(event)
+
+        sender = asyncio.create_task(_sender())
+        try:
+            while True:
+                message = await socket.receive_json()
+                if message.get("type") == "position":
+                    runner.set_position(
+                        int(message.get("time_ms") or 0),
+                        str(message.get("language") or "") or None,
+                    )
+        except (WebSocketDisconnect, RuntimeError, ValueError):
+            pass
+        finally:
+            detach()
+            sender.cancel()
 
     @app.websocket("/api/realtime")
     async def realtime(socket: WebSocket) -> None:
