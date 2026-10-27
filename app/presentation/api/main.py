@@ -1096,10 +1096,14 @@ def create_app() -> FastAPI:
             rows = [item] if item else []
         else:
             rows = db.many(conn, "SELECT * FROM subtitles WHERE project_id=?", (project_id,))
+        job = db.one(
+            conn,
+            "SELECT status FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        )
+        processing = job is not None and _job_is_running(str(job["status"]))
         return {
-            "subtitles": [
-                {"language": r["language"], "cues": json.loads(r["cues_json"])} for r in rows if r is not None
-            ]
+            "subtitles": [_track_view(project_id, r, processing=processing) for r in rows if r is not None]
         }
 
     @app.put("/api/subtitles/{project_id}")
@@ -1275,6 +1279,56 @@ def _job(row: Any) -> dict[str, Any]:
         "stage_history": history,
         "mode": str(row["mode"]) if "mode" in keys and row["mode"] else "full",
         "last_cue_ms": int(row["last_cue_ms"] or 0) if "last_cue_ms" in keys else 0,
+    }
+
+
+# Estados en los que el worker ya NO escribe pistas.
+_SETTLED_STATUSES = {"PENDING", "COMPLETED", "FAILED", "CANCELLED", "PARTIAL", "SUCCESS"}
+
+
+def _job_is_running(status: str) -> bool:
+    return status.upper() not in _SETTLED_STATUSES
+
+
+def _track_view(project_id: str, row: Any, *, processing: bool) -> dict[str, Any]:
+    """Pista de un idioma tal como la consume el reproductor.
+
+    Contrato de tiempos: `start_ms`/`end_ms` son milisegundos ENTEROS sobre la
+    línea temporal del vídeo original (nunca relativos a una ventana de audio).
+    Un cue está activo en el instante `t` cuando `start_ms <= t < end_ms`.
+
+    `covered_ms` dice hasta dónde está procesada ESTA pista; con `status`
+    `processing` el reproductor sabe qué tramos siguen pendientes.
+    """
+    language = str(row["language"])
+    try:
+        raw = json.loads(row["cues_json"])
+    except (TypeError, json.JSONDecodeError):
+        raw = []
+    cues = []
+    for position, cue in enumerate(raw if isinstance(raw, list) else [], start=1):
+        index = int(cue.get("index") or position)
+        cues.append(
+            {
+                **cue,
+                "id": str(cue.get("id") or f"{project_id}:{language}:{index}"),
+                "project_id": project_id,
+                "index": index,
+                "language": language,
+                "start_ms": int(cue.get("start_ms", 0)),
+                "end_ms": int(cue.get("end_ms", 0)),
+                "text": str(cue.get("text", "")),
+                "state": str(cue.get("state") or "final"),
+            }
+        )
+    keys = row.keys() if hasattr(row, "keys") else []
+    covered = int(row["covered_ms"] or 0) if "covered_ms" in keys else 0
+    return {
+        "project_id": project_id,
+        "language": language,
+        "status": "processing" if processing else "complete",
+        "covered_ms": max(covered, max((cue["end_ms"] for cue in cues), default=0)),
+        "cues": cues,
     }
 
 

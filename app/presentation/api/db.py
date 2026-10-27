@@ -95,6 +95,11 @@ _JOB_COLUMNS = {
     # Último milisegundo de audio ya cubierto por subtítulos.
     "last_cue_ms": "INTEGER NOT NULL DEFAULT 0",
 }
+_SUBTITLE_COLUMNS = {
+    # Hasta qué milisegundo del VÍDEO ORIGINAL está procesada esta pista. Las
+    # traducciones van por detrás del original: cada idioma tiene la suya.
+    "covered_ms": "INTEGER NOT NULL DEFAULT 0",
+}
 
 
 def _load_env_once() -> None:
@@ -326,6 +331,7 @@ def migrate(conn: Connection) -> None:
     conn.executescript(_SCHEMA)
     _add_missing_columns(conn, "projects", _PROJECT_COLUMNS)
     _add_missing_columns(conn, "jobs", _JOB_COLUMNS)
+    _add_missing_columns(conn, "subtitles", _SUBTITLE_COLUMNS)
     conn.commit()
 
 
