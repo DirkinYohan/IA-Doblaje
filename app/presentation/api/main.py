@@ -1200,18 +1200,52 @@ def create_app() -> FastAPI:
             await socket.send_json({"type": "error", "message": f"ASR en vivo no disponible: {exc}"})
             await socket.close()
             return
+        # La recepción NO espera a la transcripción: un lector deja los mensajes
+        # en cola y el procesador toma TODO lo acumulado en cada vuelta. Antes
+        # se transcribía trama a trama; Whisper en CPU es más lento que el audio,
+        # la cola crecía y cada subtítulo llegaba más tarde que el anterior
+        # (segundos por detrás del vídeo), así que nunca llegaba a verse.
+        inbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def _reader() -> None:
+            try:
+                while True:
+                    await inbox.put(await socket.receive_json())
+            except (WebSocketDisconnect, RuntimeError, ValueError):
+                await inbox.put(None)
+
+        reader = asyncio.create_task(_reader())
+        warming = False
         try:
             while True:
-                payload = await socket.receive_json()
-                # Los mensajes se procesan en orden, uno a uno, fuera del bucle.
-                events = await asyncio.to_thread(session.handle, payload)
+                first = await inbox.get()
+                if first is None:
+                    return
+                batch = [first]
+                closed = False
+                while not inbox.empty():
+                    item = inbox.get_nowait()
+                    if item is None:
+                        closed = True
+                        break
+                    batch.append(item)
+                events = await asyncio.to_thread(session.handle_batch, batch)
+                if not warming and session.targets and hasattr(session.translator, "warm"):
+                    # Con un idioma de destino ya configurado, el traductor se
+                    # precarga en paralelo mientras llega el primer audio.
+                    warming = True
+                    asyncio.get_running_loop().run_in_executor(None, session.translator.warm)
                 for event in events:
                     await socket.send_json(event)
+                if closed:
+                    return
         except WebSocketDisconnect:
             return
         except RuntimeError:
             # El cliente cerró mientras se transcribía: enviar ya no procede.
             return
+        finally:
+            reader.cancel()
 
     return app
 
@@ -1347,19 +1381,32 @@ def _own_job(conn: Any, job_id: str, user_id: str) -> Any:
 
 
 def _live_translator(session: RealtimeSession):
+    import threading
+
     holder: dict[str, Any] = {}
+    # M2M100 no es reentrante: precarga y traducciones se serializan.
+    lock = threading.Lock()
 
     def _run(text: str, partial: bool) -> dict[str, str]:
-        if "adapter" not in holder:
-            from app.infrastructure.translation.m2m100_translation_adapter import (
-                M2M100TranslatorAdapter,
-            )
+        with lock:
+            if "adapter" not in holder:
+                from app.infrastructure.translation.m2m100_translation_adapter import (
+                    M2M100TranslatorAdapter,
+                )
 
-            holder["adapter"] = M2M100TranslatorAdapter()
-        return m2m_translator(
-            holder["adapter"], session.source_language, list(session.targets)
-        )(text, partial)
+                holder["adapter"] = M2M100TranslatorAdapter()
+            return m2m_translator(
+                holder["adapter"], session.source_language, list(session.targets)
+            )(text, partial)
 
+    def _warm() -> None:
+        """Carga M2M100 (~16 s en CPU) antes de la primera frase, no durante."""
+        try:
+            _run("ok", False)
+        except Exception:  # noqa: BLE001 - optimización: la traducción real informará
+            pass
+
+    _run.warm = _warm  # type: ignore[attr-defined]
     return _run
 
 

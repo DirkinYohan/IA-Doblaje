@@ -142,11 +142,12 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
         with client.websocket_connect("/api/realtime") as socket:
             reader = _Reader(socket)
             try:
-                socket.send_json({"type": "config", "source_language": "es", "targets": ["en"]})
+                # Viendo el idioma ORIGINAL: sin destinos, hay parciales.
+                socket.send_json({"type": "config", "source_language": "es", "targets": []})
                 configured = reader.next()
                 assert configured is not None and configured["type"] == "configured"
                 assert configured["source_language"] == "es"
-                assert configured["targets"] == ["en"]
+                assert configured["targets"] == []
 
                 partials: list[dict[str, Any]] = []
                 finals: list[dict[str, Any]] = []
@@ -170,8 +171,18 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
                 assert partials[0]["state"] == "provisional"
                 assert partials[0]["text"] == "Hola"
                 assert partials[0]["language"] == "es"
-                # El contrato siempre incluye el mapa de traducciones.
-                assert partials[0]["translations"] == {"en": "[en] Hola"}
+                # El contrato siempre incluye el mapa de traducciones; los
+                # parciales no se traducen (coste en CPU), sólo los finales.
+                assert partials[0]["translations"] == {}
+
+                # El usuario cambia a inglés SIN reconectar: nuevo `config`.
+                socket.send_json({"type": "config", "source_language": "es", "targets": ["en"]})
+                for _ in range(10):
+                    candidate = reader.next(timeout=1.0)
+                    assert candidate is not None, "el config debe responder"
+                    if candidate["type"] == "configured":
+                        assert candidate["targets"] == ["en"]
+                        break
 
                 # 2. Silencio: cierra el segmento y emite el subtítulo DEFINITIVO.
                 silence = _pcm_b64([0.0] * 1_600)
@@ -184,6 +195,7 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
                 assert finals, "debe emitir un subtítulo final"
                 assert finals[0]["state"] == "final"
                 assert finals[0]["text"] == "Hola, ¿cómo estás?"
+                assert finals[0]["translations"] == {"en": "[en] Hola, ¿cómo estás?"}
                 assert finals[0]["end_ms"] >= finals[0]["start_ms"]
 
                 # 3. Seek: limpia el estado y reanuda el reloj.
