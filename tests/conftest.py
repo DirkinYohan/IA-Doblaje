@@ -44,6 +44,9 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.pop("DATABASE_URL", None)
     # Y tampoco deben subir archivos al bucket real del almacenamiento.
     os.environ["IA_STORAGE_BACKEND"] = "local"
+    # Ni enviar correos reales por Brevo: vacía (no ausente), porque la carga
+    # del `.env` no pisa lo que ya existe y así nunca trae la clave real.
+    os.environ["BREVO_API_KEY"] = ""
     # Cargar Whisper y M2M100 en cada prueba haría la suite lentísima.
     os.environ["IA_PRELOAD_MODELS"] = "0"
     # Ni las pruebas de la API cargan Whisper/M2M100 al listar proyectos.

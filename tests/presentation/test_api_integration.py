@@ -163,12 +163,9 @@ class TestAuthRequirements:
         mail_dir = Path(os.environ["IA_MAIL_DIR"])
         response = client.post("/api/auth/forgot-password", json={"email": auth["email"]})
         assert response.status_code == 200
-        files = list(mail_dir.glob("*.txt"))
-        assert files, "no se escribió el correo de recuperación"
-        token = ""
-        for line in files[-1].read_text(encoding="utf-8").splitlines():
-            if line.startswith("token="):
-                token = line.split("=", 1)[1].strip()
+        from tests.fixtures.mailbox import wait_for_mail
+
+        token = wait_for_mail(mail_dir, "reset", auth["email"])["token"]
         assert token, "el correo no contiene token"
         reset = client.post(
             "/api/auth/reset-password",

@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS reset_tokens (
     expires_at TEXT NOT NULL,
     used INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS email_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -81,6 +88,10 @@ CREATE TABLE IF NOT EXISTS subtitles (
 """
 
 # Columnas añadidas después de la creación inicial de las tablas.
+_USER_COLUMNS = {
+    # Vacío mientras el correo no se haya confirmado con el enlace enviado.
+    "email_verified_at": "TEXT NOT NULL DEFAULT ''",
+}
 _PROJECT_COLUMNS = {
     "duration_ms": "INTEGER NOT NULL DEFAULT 0",
     "thumbnail_path": "TEXT NOT NULL DEFAULT ''",
@@ -329,6 +340,7 @@ def _existing_columns(conn: Connection, table: str) -> set[str]:
 
 def migrate(conn: Connection) -> None:
     conn.executescript(_SCHEMA)
+    _add_missing_columns(conn, "users", _USER_COLUMNS)
     _add_missing_columns(conn, "projects", _PROJECT_COLUMNS)
     _add_missing_columns(conn, "jobs", _JOB_COLUMNS)
     _add_missing_columns(conn, "subtitles", _SUBTITLE_COLUMNS)

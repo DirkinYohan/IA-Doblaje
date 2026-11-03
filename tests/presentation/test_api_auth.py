@@ -6,6 +6,8 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.fixtures.mailbox import wait_for_mail
+
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
@@ -36,8 +38,7 @@ def test_registro_login_logout_y_reset(client: TestClient, tmp_path: Path) -> No
     assert login.status_code == 200
     forgot = client.post("/api/auth/forgot-password", json={"email": "ada@example.com"})
     assert forgot.status_code == 200
-    mail = next(Path(os.environ["IA_MAIL_DIR"]).glob("*.txt"))
-    token = [line.split("=", 1)[1] for line in mail.read_text(encoding="utf-8").splitlines() if line.startswith("token=")][0]
+    token = wait_for_mail(Path(os.environ["IA_MAIL_DIR"]), "reset", "ada@example.com")["token"]
     reset = client.post("/api/auth/reset-password", json={"token": token, "password": "otraClave9", "confirm": "otraClave9"})
     assert reset.status_code == 200
     assert client.post("/api/auth/login", json={"email": "ada@example.com", "password": "secreto123"}).status_code == 401
