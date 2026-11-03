@@ -274,7 +274,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["*"],
     )
     app.state.conn = conn
@@ -348,18 +348,21 @@ def create_app() -> FastAPI:
             ws_tickets[ticket] = (user_id, now + WS_TICKET_TTL_S)
         return ticket
 
+    def user_from_ticket(ticket: str) -> sqlite3_row:
+        with ws_tickets_lock:
+            entry = ws_tickets.pop(ticket, None)
+        if entry is None or entry[1] < time.monotonic():
+            raise HTTPException(status_code=401, detail="Ticket inválido o caducado")
+        row = db.one(conn, "SELECT * FROM users WHERE id=?", (entry[0],))
+        if row is None:
+            raise HTTPException(status_code=401, detail="Sesión inválida")
+        return row
+
+    def user_from_ticket_or_cookie(ticket: str | None, token: str | None) -> sqlite3_row:
+        return user_from_ticket(ticket) if ticket else user_from_cookie(token)
+
     def user_from_socket(socket: WebSocket) -> sqlite3_row:
-        ticket = socket.query_params.get("ticket") or ""
-        if ticket:
-            with ws_tickets_lock:
-                entry = ws_tickets.pop(ticket, None)
-            if entry is None or entry[1] < time.monotonic():
-                raise HTTPException(status_code=401, detail="Ticket inválido o caducado")
-            row = db.one(conn, "SELECT * FROM users WHERE id=?", (entry[0],))
-            if row is None:
-                raise HTTPException(status_code=401, detail="Sesión inválida")
-            return row
-        return user_from_cookie(socket.cookies.get(COOKIE))
+        return user_from_ticket_or_cookie(socket.query_params.get("ticket") or "", socket.cookies.get(COOKIE))
 
     def set_session(response: Response, user_id: str, remember: bool) -> None:
         token = new_token()
@@ -534,6 +537,10 @@ def create_app() -> FastAPI:
         db.run(conn, "DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
         return {"ok": True}
 
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.post("/api/ws-ticket")
     def ws_ticket(ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
         row = user_from_cookie(ia_session)
@@ -617,9 +624,10 @@ def create_app() -> FastAPI:
         file: UploadFile = File(...),
         source_language: str = Form("und"),
         target_languages: str = Form("es"),
+        ticket: str | None = None,
         ia_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
-        row = user_from_cookie(ia_session)
+        row = user_from_ticket_or_cookie(ticket, ia_session)
         source = source_language.strip().lower()
         targets = [p.strip().lower() for p in target_languages.split(",") if p.strip()]
         if source not in OFFICIAL | {"und"} or not targets or any(t not in OFFICIAL for t in targets):
@@ -1213,12 +1221,14 @@ def create_app() -> FastAPI:
         return render.status(paths["output"], project_id, lang, stamp)
 
     @app.get("/api/videos/{project_id}/render/file")
-    def render_file(project_id: str, lang: str, ia_session: str | None = Cookie(default=None)) -> Response:
+    def render_file(
+        project_id: str, lang: str, ticket: str | None = None, ia_session: str | None = Cookie(default=None)
+    ) -> Response:
         from urllib.parse import quote
 
         from app.presentation.api import render
 
-        row = user_from_cookie(ia_session)
+        row = user_from_ticket_or_cookie(ticket, ia_session)
         project, _cues, _stamp = _render_track(project_id, row["id"], lang)
         video = render.ready_file(paths["output"], project_id, lang)
         if video is None:

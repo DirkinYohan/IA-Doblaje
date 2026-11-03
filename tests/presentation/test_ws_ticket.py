@@ -81,3 +81,38 @@ def test_sin_ticket_ni_cookie_se_rechaza_con_codigo(client: TestClient, job: dic
 def test_la_cookie_sigue_funcionando(client: TestClient, job: dict[str, str]) -> None:
     with client.websocket_connect(f"/api/jobs/{job['job_id']}/events") as socket:
         assert socket.receive_json()["type"] == "snapshot"
+
+
+def test_health_sin_sesion(client: TestClient, job: dict[str, str]) -> None:
+    anonymous = TestClient(client.app)
+    response = anonymous.get("/api/health")
+    assert response.status_code == 200 and response.json() == {"status": "ok"}
+
+
+def test_subida_directa_con_ticket_sin_cookie(client: TestClient, job: dict[str, str]) -> None:
+    ticket = client.post("/api/ws-ticket").json()["ticket"]
+    anonymous = TestClient(client.app)
+    upload = anonymous.post(
+        f"/api/videos?ticket={ticket}",
+        files={"file": ("b.wav", b"RIFF" + b"\0" * 2000, "audio/wav")},
+        data={"source_language": "en", "target_languages": "es"},
+    )
+    assert upload.status_code == 200, upload.text
+    assert client.get(f"/api/videos/{upload.json()['id']}").status_code == 200
+    again = anonymous.post(
+        f"/api/videos?ticket={ticket}",
+        files={"file": ("c.wav", b"RIFF" + b"\0" * 2000, "audio/wav")},
+        data={"source_language": "en", "target_languages": "es"},
+    )
+    assert again.status_code == 401
+    assert anonymous.post(
+        "/api/videos",
+        files={"file": ("d.wav", b"RIFF" + b"\0" * 2000, "audio/wav")},
+        data={"source_language": "en", "target_languages": "es"},
+    ).status_code == 401
+
+
+def test_descarga_directa_con_ticket_ajeno_no_sirve(client: TestClient, job: dict[str, str]) -> None:
+    anonymous = TestClient(client.app)
+    response = anonymous.get("/api/videos/no-existe/render/file?lang=es&ticket=inventado")
+    assert response.status_code == 401
