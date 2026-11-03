@@ -755,6 +755,9 @@ def create_app() -> FastAPI:
         running = live.get_runner(project_id)
         if running is not None:
             running.stop()
+        from app.presentation.api import render
+
+        render.forget(paths["output"], project_id)
 
         # Al borrar el proyecto también se borra su objeto del almacenamiento.
         media_path = project["media_path"]
@@ -1203,6 +1206,68 @@ def create_app() -> FastAPI:
         if not files:
             raise HTTPException(status_code=404, detail="No hay subtítulos")
         return Response(content=zip_exports(files), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project_id}.zip"'})
+
+    # --- Vídeo con los subtítulos incrustados ------------------------------
+    def _render_track(project_id: str, user_id: str, lang: str) -> tuple[Any, list[Any], str]:
+        project = _own_project(conn, project_id, user_id)
+        row = db.one(conn, "SELECT * FROM subtitles WHERE project_id=? AND language=?", (project_id, lang))
+        if row is None:
+            raise HTTPException(status_code=404, detail="Subtítulos no encontrados")
+        cues = [cue_from_dict(item) for item in json.loads(row["cues_json"])]
+        if not cues:
+            raise HTTPException(status_code=409, detail="La pista todavía no tiene subtítulos")
+        # La marca de la pista: si se edita, el vídeo se vuelve a renderizar.
+        return project, cues, str(row["updated_at"] or "")
+
+    @app.post("/api/videos/{project_id}/render")
+    async def start_render(project_id: str, request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        """Prepara el MP4 con los subtítulos de un idioma incrustados."""
+        from app.presentation.api import live, render
+
+        row = user_from_cookie(ia_session)
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 - cuerpo opcional
+            body = {}
+        lang = str(body.get("lang") or "").strip().lower()
+        if not lang:
+            raise HTTPException(status_code=422, detail="Falta el idioma")
+        project, cues, stamp = _render_track(project_id, row["id"], lang)
+        return render.start(
+            output_root=paths["output"], project=project, language=lang, cues=cues,
+            stamp=stamp, source_of=live.media_source,
+        )
+
+    @app.get("/api/videos/{project_id}/render")
+    def render_status(project_id: str, lang: str, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+        from app.presentation.api import render
+
+        row = user_from_cookie(ia_session)
+        _project, _cues, stamp = _render_track(project_id, row["id"], lang)
+        return render.status(paths["output"], project_id, lang, stamp)
+
+    @app.get("/api/videos/{project_id}/render/file")
+    def render_file(project_id: str, lang: str, ia_session: str | None = Cookie(default=None)) -> Response:
+        from urllib.parse import quote
+
+        from app.presentation.api import render
+
+        row = user_from_cookie(ia_session)
+        project, _cues, _stamp = _render_track(project_id, row["id"], lang)
+        # El último MP4 preparado, aunque la pista haya cambiado después.
+        video = render.ready_file(paths["output"], project_id, lang)
+        if video is None:
+            raise HTTPException(status_code=404, detail="El vídeo todavía no está listo")
+        base = Path(str(project["title"] or "video")).stem.replace("_", " ").strip() or "video"
+        name = f"{base} ({lang}).mp4"
+        ascii_name = name.encode("ascii", "ignore").decode() or f"video-{lang}.mp4"
+        return FileResponse(
+            video,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+            },
+        )
 
     @app.websocket("/api/videos/{project_id}/live")
     async def live_subtitles(socket: WebSocket, project_id: str) -> None:

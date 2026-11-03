@@ -569,28 +569,37 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def open_reader(project: Any) -> Any:
-    """Lector de audio por tramos del ORIGINAL, sin descargarlo entero.
+def media_source(project: Any) -> Any:
+    """Dónde leer el vídeo ORIGINAL sin descargarlo entero.
 
-    Usa la copia local si existe (recién subido o almacenamiento local); si el
-    vídeo está en Storage, FFmpeg lee por rangos de la URL firmada, así que el
-    primer tramo está disponible en segundos y no tras la descarga completa.
+    La copia local si existe (recién subido o almacenamiento local); si el
+    vídeo está en Storage, su URL firmada: FFmpeg lee por rangos de ella.
     """
     from app.core.config import get_settings
-    from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
-    from app.infrastructure.audio.ffmpeg_segment_reader import FFmpegSegmentReader
     from app.presentation.api import media_store
 
     temp_dir = Path(str(get_settings().paths.data_temp_dir))
     pending = media_store.find_pending(temp_dir, str(project["id"]))
     if pending is not None:
-        source: Any = pending
-    elif media_store.is_remote(project["media_path"]):
-        source = media_store.signed_url(project["media_path"], expires_in=6 * 3600)
-        if not source:
+        return pending
+    if media_store.is_remote(project["media_path"]):
+        url = media_store.signed_url(project["media_path"], expires_in=6 * 3600)
+        if not url:
             raise RuntimeError("Almacenamiento no disponible")
-    else:
-        source = Path(str(project["media_path"]))
+        return url
+    return Path(str(project["media_path"]))
+
+
+def open_reader(project: Any) -> Any:
+    """Lector de audio por tramos del ORIGINAL, sin descargarlo entero.
+
+    El primer tramo está disponible en segundos y no tras la descarga
+    completa (ver `media_source`).
+    """
+    from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
+    from app.infrastructure.audio.ffmpeg_segment_reader import FFmpegSegmentReader
+
+    source = media_source(project)
     resolver = SubprocessFFmpegBinaryResolver()
     ok, ffmpeg_bin, _version = resolver.resolve("ffmpeg")
     if not ok:
