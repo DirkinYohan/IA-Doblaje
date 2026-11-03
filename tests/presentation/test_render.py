@@ -56,6 +56,11 @@ def _frame(video: Path, at: float) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.uint8).reshape(H, W).astype(np.int16)
 
 
+def changed(a: np.ndarray, b: np.ndarray) -> float:
+    """Fracción de píxeles claramente distintos (el texto ocupa poca área)."""
+    return float((np.abs(a - b) > 30).mean())
+
+
 def _streams(video: Path) -> set[str]:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name", "-of", "json", str(video)],
@@ -76,10 +81,6 @@ def test_los_subtitulos_quedan_dibujados_en_la_imagen(clip: Path, tmp_path: Path
     assert {"h264", "aac"} <= _streams(out), "vídeo H.264 y el audio conservado"
     assert progress and progress == sorted(progress), "progreso creciente"
 
-    def changed(a: np.ndarray, b: np.ndarray) -> float:
-        """Fracción de píxeles claramente distintos (el texto ocupa poca área)."""
-        return float((np.abs(a - b) > 30).mean())
-
     with_text, original = _frame(out, 1.0), _frame(clip, 1.0)
     bottom = changed(with_text[int(H * 0.7):], original[int(H * 0.7):])
     top = changed(with_text[: int(H * 0.5)], original[: int(H * 0.5)])
@@ -88,6 +89,79 @@ def test_los_subtitulos_quedan_dibujados_en_la_imagen(clip: Path, tmp_path: Path
     # Pasado su intervalo, el subtítulo desaparece.
     after = changed(_frame(out, 2.6)[int(H * 0.7):], _frame(clip, 2.6)[int(H * 0.7):])
     assert after < 0.001
+
+
+def _frames(video: Path) -> int:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+         "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return int(out.strip())
+
+
+def test_por_tramos_en_paralelo_sin_saltos_en_las_uniones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tramos de 2 s: el subtítulo que cruza una unión se ve a ambos lados."""
+    source = tmp_path / "long.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", f"color=c=gray:s={W}x{H}:d=6:r=25",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(source),
+        ],
+        check=True, timeout=120,
+    )
+    monkeypatch.setattr(render, "_MIN_PART_MS", 2000)
+    _w, _h, duration = render.probe(source)
+    assert len(render._parts(duration)) == 3
+    # Cruza la unión de los 2 s; el segundo, la de los 4 s.
+    cues = [Cue(1, 1500, 2600, "PRIMERO"), Cue(2, 3700, 4400, "SEGUNDO")]
+    ass = to_ass_burn(cues, language="es", width=W, height=H)
+    progress: list[int] = []
+    out = tmp_path / "es.mp4"
+    render.burn(source, ass, out, duration_ms=duration, on_progress=progress.append)
+
+    assert progress == sorted(progress)
+    assert {"h264", "aac"} <= _streams(out)
+    assert abs(_frames(out) - _frames(source)) <= 1, "ni fotogramas perdidos ni repetidos"
+    for at, visible in [(1.0, False), (1.8, True), (2.3, True), (3.2, False), (3.9, True), (4.2, True), (5.0, False)]:
+        bottom = changed(_frame(out, at)[int(H * 0.7):], _frame(source, at)[int(H * 0.7):])
+        assert (bottom > 0.03) is visible, f"a los {at} s: {bottom:.1%}"
+
+
+def test_el_original_remoto_se_descarga_una_vez(clip: Path, tmp_path: Path) -> None:
+    import http.server
+    import threading as th
+
+    hits: list[str] = []
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(clip.parent), **kwargs)
+
+        def log_message(self, *_args) -> None:
+            hits.append(self.path)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    th.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/{clip.name}"
+        cache = tmp_path / "cache" / "source.media"
+        seen: list[float] = []
+        assert render.local_source(url, cache, seen.append) == cache
+        assert cache.read_bytes() == clip.read_bytes()
+        assert seen and seen[-1] == 1.0
+        assert render.local_source(url, cache) == cache
+        assert len(hits) == 1, "la segunda vez sale de la caché"
+        assert list(cache.parent.glob("*.part")) == []
+    finally:
+        server.shutdown()
+        server.server_close()
+    # Una ruta local se usa tal cual.
+    assert render.local_source(clip, cache) == clip
 
 
 # --- API -------------------------------------------------------------------
