@@ -1,4 +1,3 @@
-"""python -m app.presentation.api"""
 from __future__ import annotations
 
 import uvicorn

@@ -1,7 +1,3 @@
-"""Tests unitarios T10 — Domain Value Objects y Entity Quality.
-
-Solo DOMAIN, sin IA/infraestructura. Pydantic + patrón DUT.
-"""
 from __future__ import annotations
 
 import copy
@@ -69,11 +65,6 @@ def _result(**kw):
     return QualityResult(**base)
 
 
-# =============================================================================
-# QualityRuleResult
-# =============================================================================
-
-
 class TestQualityRuleResult:
     def test_valid(self):
         r = _rule("QR01", severity="ERROR", passed=True)
@@ -120,11 +111,6 @@ class TestQualityRuleResult:
             QualityRuleResult(rule_code="QR01", severity="WARNING", x=1)  # type: ignore[call-arg]
 
 
-# =============================================================================
-# QualityThresholds
-# =============================================================================
-
-
 class TestQualityThresholds:
     def test_defaults(self):
         th = QualityThresholds()
@@ -152,11 +138,6 @@ class TestQualityThresholds:
     def test_bool_rejected(self):
         with pytest.raises(ValidationError):
             QualityThresholds(max_overlap_ms=True)  # type: ignore[arg-type]
-
-
-# =============================================================================
-# QualityResult
-# =============================================================================
 
 
 class TestQualityResult:
@@ -189,13 +170,11 @@ class TestQualityResult:
             _result(rule_results=tuple(rules))
 
     def test_level_consistent_with_score(self):
-        # score 1.0 → passed; forzar failed sería inconsistente
         with pytest.raises(ValidationError):
             _result(overall_quality_score=1.0, quality_level=QualityLevel.FAILED)
 
     def test_level_warning(self):
         rules = list(_all_rules_passed())
-        # una regla WARNING no passed
         rules[4] = QualityRuleResult(
             rule_code="QR05", severity="WARNING", passed=False, applicable=True,
             occurrences=1, penalty=0.03, reason="x",
@@ -220,7 +199,7 @@ class TestQualityResult:
                 rule_results=tuple(rules),
                 overall_quality_score=0.0,
                 quality_level=QualityLevel.FAILED,
-                num_rules_passed=11,  # incorrecto: QR01 failed
+                num_rules_passed=11,
                 num_rules_failed=0,
                 num_rules_warning=0,
             )

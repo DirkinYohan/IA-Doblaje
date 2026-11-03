@@ -1,16 +1,3 @@
-"""Persistencia de la API: SQLite local o PostgreSQL (Supabase).
-
-El motor completo sigue escribiendo SQL estándar con `?` como marcador, igual
-que antes. Esta capa decide contra qué motor habla y traduce lo mínimo
-imprescindible, de modo que el resto del código no cambia:
-
-* **Sin `IA_DATABASE_URL`** → SQLite en `data/app.sqlite` (comportamiento
-  histórico, y lo que usan las pruebas).
-* **Con `IA_DATABASE_URL`** apuntando a `postgresql://…` → PostgreSQL.
-
-Lo único específico de cada motor es lo que hay aquí: la apertura de conexión,
-el marcador de parámetros, el script de creación y la lectura de columnas.
-"""
 from __future__ import annotations
 
 import os
@@ -21,7 +8,6 @@ from typing import Any
 
 from app.core.config import PROJECT_ROOT
 
-# Forma común de una fila: `sqlite3.Row` admite índice y clave, `dict` también.
 Row = Any
 
 _LOCK = threading.RLock()
@@ -87,9 +73,7 @@ CREATE TABLE IF NOT EXISTS subtitles (
 );
 """
 
-# Columnas añadidas después de la creación inicial de las tablas.
 _USER_COLUMNS = {
-    # Vacío mientras el correo no se haya confirmado con el enlace enviado.
     "email_verified_at": "TEXT NOT NULL DEFAULT ''",
 }
 _PROJECT_COLUMNS = {
@@ -98,37 +82,22 @@ _PROJECT_COLUMNS = {
     "updated_at": "TEXT NOT NULL DEFAULT ''",
 }
 _JOB_COLUMNS = {
-    # Historial completo de etapas recorridas (JSON), para que la UI
-    # pueda mostrar todo lo ocurrido aunque el sondeo llegue tarde.
     "stage_history": "TEXT NOT NULL DEFAULT '[]'",
-    # 'progressive' (por ventanas, publica mientras procesa) | 'full'.
     "mode": "TEXT NOT NULL DEFAULT 'full'",
-    # Último milisegundo de audio ya cubierto por subtítulos.
     "last_cue_ms": "INTEGER NOT NULL DEFAULT 0",
 }
 _SUBTITLE_COLUMNS = {
-    # Hasta qué milisegundo del VÍDEO ORIGINAL está procesada esta pista. Las
-    # traducciones van por detrás del original: cada idioma tiene la suya.
     "covered_ms": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
 def _load_env_once() -> None:
-    """Vuelca `.env` en el entorno del proceso, una sola vez.
-
-    `pydantic-settings` lee `.env` para su propio modelo, pero NO lo exporta:
-    sin esto, una `IA_DATABASE_URL` escrita en `.env` nunca llegaría a este
-    módulo y la aplicación seguiría usando SQLite sin avisar.
-
-    `override=False`: lo que ya esté definido en el entorno real manda.
-    """
     from app.core.env import load_project_env
 
     load_project_env()
 
 
 def database_url() -> str:
-    """URL de PostgreSQL configurada, o cadena vacía para usar SQLite."""
     _load_env_once()
     return (
         os.environ.get("IA_DATABASE_URL") or os.environ.get("DATABASE_URL") or ""
@@ -136,11 +105,6 @@ def database_url() -> str:
 
 
 def backend_name() -> str:
-    """`postgres` o `sqlite`, según la configuración activa.
-
-    `IA_DB_BACKEND=sqlite` fuerza SQLite aunque haya una URL configurada: es la
-    salida de emergencia (y lo que usan las pruebas para no tocar datos reales).
-    """
     forced = os.environ.get("IA_DB_BACKEND", "").strip().lower()
     if forced in {"sqlite", "postgres"}:
         return forced
@@ -148,27 +112,10 @@ def backend_name() -> str:
 
 
 def _translate(sql: str) -> str:
-    """Convierte `?` (estilo SQLite) en `%s` (estilo psycopg).
-
-    El SQL del proyecto no contiene `?` dentro de literales, así que la
-    sustitución directa es segura.
-    """
     return sql.replace("?", "%s")
 
 
 class Connection:
-    """Misma interfaz para SQLite y PostgreSQL.
-
-    El resto del código usa `execute`, `executescript` y `commit`, y lee filas
-    por nombre de columna. Esta clase garantiza que ambas cosas funcionen igual
-    sobre los dos motores.
-
-    Además, en PostgreSQL se reabre sola. Una única conexión compartida es un
-    punto frágil: el pooler de Supabase cierra las sesiones inactivas y, cuando
-    eso pasaba, TODAS las peticiones devolvían 500 («the connection is closed»)
-    hasta reiniciar la API.
-    """
-
     def __init__(self, raw: Any, backend: str, reconnect: Any = None) -> None:
         self.raw = raw
         self.backend = backend
@@ -176,7 +123,6 @@ class Connection:
         self._reconnect_lock = threading.Lock()
         self.reconnects = 0
 
-    # -- salud de la conexión -------------------------------------------
     def _broken(self) -> bool:
         if self.backend != "postgres":
             return False
@@ -189,7 +135,6 @@ class Connection:
 
     @staticmethod
     def _is_disconnect(exc: BaseException) -> bool:
-        """¿El error significa que la conexión ya no sirve?"""
         text = f"{type(exc).__name__}: {exc}".lower()
         señales = (
             "connection is closed",
@@ -212,7 +157,6 @@ class Connection:
                 self.raw = self._reconnect()
                 self.reconnects += 1
 
-    # -- ejecución -----------------------------------------------------
     def _execute_pg(self, sql: str, params: tuple[Any, ...]) -> Any:
         cursor = self.raw.cursor()
         cursor.execute(_translate(sql), params)
@@ -226,7 +170,6 @@ class Connection:
         except Exception as exc:  # noqa: BLE001
             if not self._is_disconnect(exc):
                 raise
-            # La sesión murió: se reabre y se repite UNA vez.
             self._reopen()
             return self._execute_pg(sql, params)
 
@@ -249,9 +192,7 @@ class Connection:
             self._reopen()
             return _run()
 
-    # -- transacción y ciclo de vida ------------------------------------
     def commit(self) -> None:
-        # Sobre una sesión ya cerrada, commit sólo produciría otro 500.
         if self.backend == "postgres" and self._broken():
             return
         self.raw.commit()
@@ -269,7 +210,6 @@ class Connection:
 
 
 def _open_postgres(url: str, timeout: float) -> Any:
-    """Abre una sesión de PostgreSQL con los timeouts ya fijados."""
     import psycopg
     from psycopg.rows import dict_row
 
@@ -277,14 +217,11 @@ def _open_postgres(url: str, timeout: float) -> Any:
         url,
         row_factory=dict_row,
         connect_timeout=int(timeout),
-        # Mantener viva la sesión reduce los cierres por inactividad del pooler.
         keepalives=1,
         keepalives_idle=30,
         keepalives_interval=10,
         keepalives_count=5,
     )
-    # `statement_timeout` es imprescindible: sin él una consulta que el servidor
-    # no responde cuelga el hilo del worker para siempre.
     with raw.cursor() as cursor:
         cursor.execute("SET statement_timeout = '60s'")
         cursor.execute("SET lock_timeout = '15s'")
@@ -293,11 +230,6 @@ def _open_postgres(url: str, timeout: float) -> Any:
 
 
 def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
-    """Abre la conexión según la configuración.
-
-    Con `IA_DATABASE_URL` definida se ignora `target` y se usa PostgreSQL;
-    sin ella, SQLite en esa ruta.
-    """
     url = database_url()
     if backend_name() == "postgres" and url.startswith(POSTGRES_SCHEMES):
         try:
@@ -310,7 +242,6 @@ def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
         try:
             raw = _open_postgres(url, timeout)
         except Exception as exc:  # noqa: BLE001
-            # Un mensaje útil: el fallo más común es la contraseña sin escapar.
             raise RuntimeError(
                 f"No se pudo conectar a PostgreSQL ({type(exc).__name__}: {exc}). "
                 "Revisa la URL: los caracteres especiales de la contraseña deben ir "
@@ -326,7 +257,6 @@ def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
 
 
 def _existing_columns(conn: Connection, table: str) -> set[str]:
-    """Columnas presentes, consultando el catálogo de cada motor."""
     if conn.backend == "postgres":
         rows = conn.execute(
             "SELECT column_name FROM information_schema.columns "
@@ -350,7 +280,6 @@ def migrate(conn: Connection) -> None:
 def _add_missing_columns(
     conn: Connection, table: str, columns: dict[str, str]
 ) -> None:
-    """Migración aditiva idempotente: añade columnas que falten."""
     existing = _existing_columns(conn, table)
     for name, ddl in columns.items():
         if name not in existing:

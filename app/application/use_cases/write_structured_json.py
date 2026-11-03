@@ -1,8 +1,3 @@
-"""UseCase RunStructuredJsonOutputUseCase — Capa APPLICATION (T13 Step 13).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO escribe filesystem directamente (delega al JsonOutputWriterPort).
-"""
 from __future__ import annotations
 
 import time
@@ -39,13 +34,8 @@ log = get_logger("app.application.use_cases.write_structured_json")
 
 @dataclass(frozen=True, slots=True)
 class RunStructuredJsonOutputUseCase:
-    """Orquesta Step 13 Structured JSON Output. Inmutable."""
-
     writer: JsonOutputWriterPort
 
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -64,7 +54,6 @@ class RunStructuredJsonOutputUseCase:
         ensure_ascii: bool = False,
         force_save: bool = False,
     ) -> StructuredJsonOutputResult:
-        # 1) None inputs
         for name, obj in (
             ("asr_result", asr_result),
             ("timestamps", timestamps),
@@ -80,7 +69,6 @@ class RunStructuredJsonOutputUseCase:
         bind_context(job_id=job_id, phase="OUTPUT", model=MODEL_LABEL_OUTPUT_V1_LITERAL)
         t0 = time.perf_counter()
 
-        # 2) Construir los 5 documentos en orden determinista
         documents: list[tuple[str, dict[str, Any]]] = [
             ("analysis.json", self._build_analysis(validation, quality, alignment, diarization, schema_version, job_id)),
             ("transcript.json", self._build_transcript(asr_result, timestamps, schema_version, job_id)),
@@ -89,7 +77,6 @@ class RunStructuredJsonOutputUseCase:
             ("metadata.json", self._build_metadata(metrics, schema_version, job_id)),
         ]
 
-        # 3) Delegar escritura al port (sin filesystem directo)
         records: list[OutputFileRecord] = []
         sha_map: dict[str, str] = {}
         for filename, doc in documents:
@@ -124,9 +111,6 @@ class RunStructuredJsonOutputUseCase:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # Documentos
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _build_analysis(validation, quality, alignment, diarization, schema_version, job_id) -> dict[str, Any]:
@@ -155,7 +139,6 @@ class RunStructuredJsonOutputUseCase:
 
     @staticmethod
     def _build_transcript(asr_result, timestamps, schema_version, job_id) -> dict[str, Any]:
-        # timestamps oficiales T07 para cada segmento; texto desde ASR T06.
         ts_by_index = {int(s.segment_index): s for s in timestamps.segments}
         asr_by_index = {int(s.segment_index): s for s in asr_result.segments}
         segments = []

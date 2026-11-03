@@ -1,4 +1,3 @@
-"""Sesión de subtitulado en vivo. El transcriber se inyecta; el VAD es real (energía)."""
 from __future__ import annotations
 
 import base64
@@ -10,13 +9,7 @@ Transcriber = Callable[[list[float], bool], str]
 
 Translator = Callable[[str, bool], dict[str, str]]
 
-# Una frase sin pausa se cierra igualmente a este tamaño: Whisper re-transcribe
-# el búfer entero en cada parcial y, sin límite, cada pasada tarda más que la
-# anterior hasta quedarse por detrás del vídeo.
 MAX_UTTERANCE_S = 8.0
-# Si una frase terminó más de esto ANTES de la posición actual del reproductor,
-# se descarta sin transcribirla: llegaría cuando ya no sirve y retrasaría las
-# siguientes. En vivo es mejor saltarse una frase que ir cada vez más tarde.
 MAX_LAG_MS = 4000
 
 
@@ -38,24 +31,11 @@ class RealtimeSession:
         self._start_ms = 0
         self._clock_ms = 0
         self._partial_marks = 0
-        # Generación de la reproducción. El cliente la incrementa en cada salto
-        # y la envía en todos sus mensajes; los eventos la devuelven para que el
-        # cliente descarte los que pertenecen a una posición anterior.
         self._epoch = 0
-        # Posición más reciente del reproductor conocida en el lote en curso.
         self._latest_ms = 0
         self.dropped = 0
 
     def handle_batch(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Procesa de una vez los mensajes acumulados mientras se transcribía.
-
-        Transcribir es más lento que recibir audio: si cada trama lanzara su
-        parcial, la cola crecería sin límite y los subtítulos llegarían cada vez
-        más tarde respecto al vídeo. Aquí el audio en cola se acumula y sólo la
-        ÚLTIMA trama produce parcial; los finales (fin de frase) no se pierden.
-        """
-        # Si el lote contiene un salto, el audio anterior a él ya no importa: se
-        # descarta ANTES de transcribirlo (transcribirlo sólo retrasaría lo nuevo).
         epochs = [epoch for epoch in map(_epoch_of, messages) if epoch is not None]
         newest = max(epochs, default=None)
         current = [
@@ -76,8 +56,6 @@ class RealtimeSession:
         epoch = _epoch_of(message)
         if epoch is not None:
             if epoch < self._epoch:
-                # Audio o control enviado ANTES del último salto que llega
-                # tarde: pertenece a otra posición del vídeo y se ignora.
                 return []
             self._epoch = epoch
         if kind == "config":
@@ -107,10 +85,6 @@ class RealtimeSession:
         frame = max(1, int(self.sample_rate * 0.2))
         self._samples.extend(samples)
         chunk_ms = int(len(samples) * 1000 / self.sample_rate)
-        # El reloj es el del REPRODUCTOR (`time_ms`, posición del vídeo al
-        # enviar la trama). Contar muestras deriva: se pierden tramas por
-        # contrapresión y a otra velocidad de reproducción no coincide con la
-        # línea temporal del vídeo.
         media_ms = message.get("time_ms")
         if isinstance(media_ms, (int, float)) and media_ms >= 0:
             self._clock_ms = int(media_ms)
@@ -126,9 +100,6 @@ class RealtimeSession:
         elif self._voice:
             self._silence_samples += len(samples)
         too_long = len(self._samples) >= int(self.sample_rate * MAX_UTTERANCE_S)
-        # Parciales sólo para quien ve el idioma ORIGINAL: no se traducen, así
-        # que a quien ve una traducción no le sirven y cada uno cuesta una
-        # pasada de Whisper que retrasaría el final.
         if (
             partials
             and not self.targets
@@ -164,13 +135,8 @@ class RealtimeSession:
             "state": "provisional" if partial else "final",
             "language": self.source_language,
             "epoch": self._epoch,
-            # Contrato estable: siempre hay un mapa de traducciones, aunque
-            # esté vacío. El cliente no tiene que comprobar su existencia.
             "translations": {},
         }
-        # Sólo se traducen los FINALES. Una traducción cuesta segundos en CPU;
-        # hacerlo también en cada parcial dejaba el modo en vivo muy por detrás
-        # del vídeo. Los parciales sirven a quien ve el idioma original.
         if not partial and self.translator is not None and self.targets:
             try:
                 translated = self.translator(text, partial)
@@ -217,8 +183,6 @@ def _rms(samples: list[float]) -> float:
 
 
 def whisper_transcriber(adapter: Any) -> Transcriber:
-    """Adapta Faster-Whisper a una ventana PCM. Falla explícito si el modelo no carga."""
-
     def _run(samples: list[float], _partial: bool) -> str:
         import numpy as np
 
@@ -239,8 +203,6 @@ def whisper_transcriber(adapter: Any) -> Transcriber:
 
 
 def m2m_translator(adapter: Any, source: str, targets: list[str]) -> Translator:
-    """Traduce la hipótesis en vivo. Un fallo no se sustituye por el texto fuente."""
-
     def _run(text: str, _partial: bool) -> dict[str, str]:
         from app.domain.value_objects.translation import TranslationLanguageCode
 

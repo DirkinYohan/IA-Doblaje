@@ -22,9 +22,6 @@ from app.infrastructure.audio.basic_timestamp_normalizer_adapter import (
     BasicTimestampNormalizerAdapter,
 )
 
-# =========================================================================
-# Factories igual que Application tests (helpers locales)
-# =========================================================================
 _SHA = "a" * 64
 
 def _mk_prep(duration_sec: float = 10.0) -> PreprocessedAudio:
@@ -103,15 +100,11 @@ def _mk_asr(*, prep=None, vad=None, lid=None, strategy="full_audio",
     )
 
 
-# =========================================================================
-# TestAdapter Basic Happy (≥ 6 tests)
-# =========================================================================
 class TestBasicAdapterNormalizerHappy:
     def test_happy_two_segments_d4_overlap_resolution(self):
         p = _mk_prep()
         v = _mk_vad(prep=p, num=2)
         l = _mk_lid(prep=p)
-        # Seg 0 end = 4000 > Seg 1 start = 3000. Overlap 1000ms.
         a = _mk_asr(
             prep=p, vad=v, lid=l,
             segments_crudo=((1000, 4000, "A"), (3000, 5000, "B")),
@@ -123,10 +116,8 @@ class TestBasicAdapterNormalizerHappy:
         )
         assert res.num_segments_ts == 2
         assert res.num_overlaps_resolved == 1
-        # Después de clamp END overlap: seg 0 end = min(4000, 3000) = 3000
         assert res.segments[0].end_ms == 3000
         assert res.segments[0].overlap_normalized is True
-        # Seg 1 sin cambios
         assert res.segments[1].start_ms == 3000
         assert res.segments[1].end_ms == 5000
         assert res.segments[0].duration_ms == res.segments[0].end_ms - res.segments[0].start_ms
@@ -135,28 +126,24 @@ class TestBasicAdapterNormalizerHappy:
         p = _mk_prep()
         v = _mk_vad(prep=p, num=2)
         l = _mk_lid(prep=p)
-        # Orden DESC en crudo, esperamos orden ASC normalizado en segment_index oficial
         a = _mk_asr(
             prep=p, vad=v, lid=l,
             segments_crudo=((5000, 6000, "Luego"), (1000, 2000, "Primero")),
         )
         ad = BasicTimestampNormalizerAdapter()
         res = ad.normalize(p, vad_result=v, lid_result=l, asr_result=a)
-        # Después sort ASC: start=1000 va a segment_index 0
         assert res.segments[0].start_ms == 1000
         assert res.segments[0].segment_index == 0
         assert res.segments[1].start_ms == 5000
         assert res.segments[1].segment_index == 1
         assert res.strategy == "segment_ts_from_fw_raw"
-        # words D#1 == ()
         assert res.num_words_ts == 0
         assert len(res.words) == 0
 
     def test_d5_clamp_end_total_duration_ms(self):
-        p = _mk_prep(duration_sec=5.0)  # 5000 ms total
+        p = _mk_prep(duration_sec=5.0)
         v = _mk_vad(prep=p, num=1)
         l = _mk_lid(prep=p)
-        # end_ms crudo = 6000 > 5000 total. Clamp → 5000.
         a = _mk_asr(
             prep=p, vad=v, lid=l,
             segments_crudo=((1000, 6000, "Audio"),),
@@ -169,11 +156,9 @@ class TestBasicAdapterNormalizerHappy:
         assert res.segments[0].duration_ms == 4000
 
     def test_d3_vad_interpolate_1_a_1(self):
-        """D#3 ASRSegment.start_ms = None, M=vad N=asr 2==2 → match 1:1 índice."""
         p = _mk_prep()
         v = _mk_vad(prep=p, num=2)
         l = _mk_lid(prep=p)
-        # Segment 0 sin start/end; segment 1 con start/end
         a = _mk_asr(
             prep=p, vad=v, lid=l,
             segments_crudo=((None, None, "A"), (3000, 3800, "B")),
@@ -183,17 +168,13 @@ class TestBasicAdapterNormalizerHappy:
         assert res.strategy == "segment_ts_from_vad_interpolate"
         assert res.num_vad_interpolated >= 1
         assert res.num_fw_none_startms_fixed == 1
-        # Seg 0 interpolated: corresponde a VoiceInterval index=0 (1000,1800)
         assert res.segments[0].vad_interpolated is True
         assert res.segments[0].start_ms == 1000
         assert res.segments[0].end_ms == 1800
-        # Seg 1 sigue siendo fw
         assert res.segments[1].vad_interpolated is False
         assert res.segments[1].source == "fw_raw"
 
     def test_no_crash_100_percent_overlap_non_strict_is_rejected_strict(self):
-        """Overlap extreme: seg0 [1000-5000], seg1 [1500-2000].
-        Clamp produce end(seg0) = 1500. Seg1 end(2000) > seg1 start(1500). OK."""
         p = _mk_prep(duration_sec=10.0)
         v = _mk_vad(prep=p, num=2)
         l = _mk_lid(prep=p)
@@ -222,14 +203,12 @@ class TestBasicAdapterNormalizerHappy:
 class TestBasicAdapterNormalizerInvalidInputs:
     def test_d3_start_none_sin_vad_intervals(self):
         p = _mk_prep()
-        v = _mk_vad(prep=p, num=0, strategy="vad_no_speech")  # intervals 0
+        v = _mk_vad(prep=p, num=0, strategy="vad_no_speech")
         l = _mk_lid(prep=p)
         a = _mk_asr(
             prep=p, vad=v, lid=l, strategy="full_audio",
             segments_crudo=((None, None, "A"),),
         )
-        # Silent UseCase handle; pero adapter directo recibe segments vacíos? No, segments 1.
-        # adapter debe fallar porque _match_vad_interval returns None None y strict=True
         ad = BasicTimestampNormalizerAdapter()
         with pytest.raises(ValidationFailedError, match="sin VAD match válido"):
             ad.normalize(p, vad_result=v, lid_result=l, asr_result=a)
@@ -240,7 +219,7 @@ class TestBasicAdapterNormalizerInvalidInputs:
         l = _mk_lid(prep=p)
         a = _mk_asr(
             prep=p, vad=v, lid=l,
-            segments_crudo=((1000, 1005, "tiny"),),  # duration 5 < default min=10
+            segments_crudo=((1000, 1005, "tiny"),),
         )
         ad = BasicTimestampNormalizerAdapter()
         with pytest.raises(ValidationFailedError):
@@ -267,9 +246,6 @@ class TestBasicAdapterNormalizerInvalidInputs:
         assert len(res.validation_errors) >= 1
 
 
-# =========================================================================
-# Static audit imports T08+ (≥ 2 tests)
-# =========================================================================
 class TestAdapterStaticAudit:
     @pytest.fixture
     def adapter_source(self) -> str:
@@ -305,7 +281,6 @@ class TestAdapterStaticAudit:
         )
 
     def test_no_t08_keywords_executable_code(self, adapter_source: str):
-        """pyannote/diarization/SPEAKER_00/weighted overlap/quality_score deben ser 0."""
         tree = ast.parse(adapter_source)
         bad_calls: list[str] = []
         keywords = ("pyannote", "diarization", "SPEAKER_00", "SPEAKER_01",
@@ -326,37 +301,26 @@ class TestAdapterStaticAudit:
             elif isinstance(node, ast.Name):
                 for k in keywords:
                     if node.id.lower() == k.lower():
-                        # Solo si NO está dentro de un context docstring/literal?
-                        # Aceptar nombres variables iguales pero filtrar:
                         pass
         assert bad_calls == []
 
     def test_no_t07_calls_word_timestamps_in_fw_adapter_or_other(self, adapter_source: str):
-        """word_timestamps no debe aparecer en calls (solo en comentarios/literals tests)."""
         tree = ast.parse(adapter_source)
         for node in ast.walk(tree):
             if isinstance(node, ast.keyword) and node.arg == "word_timestamps":
                 raise AssertionError("keyword word_timestamps en adapter T07 (esperado 0)")
 
 
-# =========================================================================
-# TestAdapter Edge cases (≥ 3 tests más)
-# =========================================================================
 class TestBasicAdapterEdgeCases:
     def test_zero_segments_silent_case(self):
-        """Silent lo resuelve UseCase; Adapter se invoca con 0 segments?
-        Adapter debe retornar strategy_ok sin segments. Pero la chain validation
-        en build_chain produce res num_segments_ts = 0 → OK."""
         p = _mk_prep(duration_sec=10.0)
         v = _mk_vad(prep=p, num=0)
         l = _mk_lid(prep=p)
         a = _mk_asr(prep=p, vad=v, lid=l, strategy="asr_silent_fallback", segments_crudo=())
         ad = BasicTimestampNormalizerAdapter()
-        # strategy_raw=True pero len(segments) 0 → devolver build chain sin fw raw:
         res = ad.normalize(p, vad_result=v, lid_result=l, asr_result=a,
                            thresholds=AsrTimestampThresholds(strict_validity=True))
         assert res.num_segments_ts == 0
-        # words 0
         assert res.num_words_ts == 0
 
     def test_d3_vad_none_but_fallback_flag_off_is_validation_failed(self):

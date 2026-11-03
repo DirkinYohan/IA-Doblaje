@@ -1,7 +1,3 @@
-"""Value Objects Diarization Step 08 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (sin IA).
-"""
 from __future__ import annotations
 
 import math
@@ -23,10 +19,6 @@ from app.core.constants import (
     SPEAKER_LABEL_REGEX,
 )
 
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 _SPEAKER_LABEL_RE = re.compile(SPEAKER_LABEL_REGEX)
 
@@ -87,21 +79,7 @@ def _validate_speaker_label(v: object) -> str:
 SpeakerLabel = Annotated[str, BeforeValidator(_validate_speaker_label)]
 
 
-# ---------------------------------------------------------------------------
-# 2) SpeakerTurn
-# ---------------------------------------------------------------------------
-
-
 class SpeakerTurn(BaseModel):
-    """Turno de hablante (intervalo temporal atribuido a un speaker).
-
-    Garantias:
-      start_ms >= 0
-      end_ms > start_ms
-      duration_ms == end_ms - start_ms (single source of truth)
-      confidence en [0,1], sin NaN/Inf/bool
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     speaker_label: SpeakerLabel = Field(..., description="Label normalizado SPEAKER_NN.")
@@ -131,24 +109,7 @@ class SpeakerTurn(BaseModel):
         return self.duration_ms / 1000.0
 
 
-# ---------------------------------------------------------------------------
-# 3) DiarizationThresholds (configuracion centralizada T08)
-# ---------------------------------------------------------------------------
-
-
 class DiarizationThresholds(BaseModel):
-    """Configuracion T08. Defaults estrictos.
-
-    min_speaker_duration_ms = 200
-    min_gap_ms              = 0
-    max_num_speakers        = 10
-    allow_merge_proximal    = True
-    allow_silent_fallback   = True
-    strict_validity         = True
-    max_turns_safety        = 100000
-    max_overlap_tolerance_ms = 0
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     min_speaker_duration_ms: int = Field(

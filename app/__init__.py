@@ -1,16 +1,3 @@
-"""IA Doblaje Engine - Fase 1: Motor de Analisis de Audio.
-
-Package raiz de la aplicacion.
-En T01 solo exporta metadatos basicos y la version.
-
-Arquitectura (Clean Architecture):
-    - app.core:           Cross-cutting (config, logging, exceptions, device)
-    - app.domain:         Entities, ValueObjects, ABC Interfaces (sin dependencias externas)
-    - app.application:    UseCases, Services (Quality, Alignment, Metrics, ...)
-    - app.infrastructure: Implementaciones concretas de Interfaces
-    - app.presentation:   Entrypoints CLI + FastAPI skeleton
-"""
-
 from __future__ import annotations
 
 __title__ = "ia-doblaje-engine"

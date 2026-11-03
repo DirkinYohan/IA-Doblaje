@@ -1,20 +1,3 @@
-"""Logging estructurado mediante structlog (T02.3 implementacion completa).
-
-Funcionalidad PUBLICA:
-    setup_logging(level, fmt, env)
-    get_logger(name)
-    bind_context(**kwargs)
-    unbind_context(*keys)
-    reset_context()
-
-REGLAS CRITICAS:
-  - NUNCA imprimir HF_TOKEN / SecretStr / credenciales / tokens / passwords.
-  - Modo dev  = ConsoleRenderer colorizado + legible.
-  - Modo prod = JSONRenderer NDJSON una linea por evento.
-  - Bridge bidireccional: logging stdlib Python <-> structlog.
-  - Context global via structlog.contextvars (thread/greenlet safe).
-"""
-
 from __future__ import annotations
 
 import logging
@@ -26,10 +9,6 @@ from pydantic import SecretStr
 
 from app.core.constants import ENGINE_VERSION
 
-
-# =============================================================================
-# Filter: NUNCA loggear secretos / tokens / passwords / credenciales
-# =============================================================================
 
 _SECRET_KEY_HINTS: tuple[str, ...] = (
     "token",
@@ -65,7 +44,6 @@ def _redact_value(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         return _SENTINEL
     if isinstance(value, Mapping):
-        # Recursivo: para cada key del dict anidado, CHEQUEAR si key es secret key tambien!
         out: dict[str, Any] = {}
         for k, v in value.items():
             if _is_secret_key(str(k)):
@@ -82,11 +60,6 @@ def _redact_value(value: Any) -> Any:
 def redact_secrets_processor(
     logger: logging.Logger, method_name: str, event_dict: structlog.types.EventDict
 ) -> structlog.types.EventDict:
-    """Processor structlog: elimina secretos de keys sospechosas + SecretStr.
-
-    Safe: No elimina keys no relacionadas. Preserva valores normales.
-    Compatible con dumps anidados (dict/list/tuple).
-    """
     if not event_dict:
         return event_dict
 
@@ -99,12 +72,7 @@ def redact_secrets_processor(
     return redacted  # type: ignore[return-value]
 
 
-# =============================================================================
-# Configuracion de processors / renderers
-# =============================================================================
-
 def _shared_processors(env: str) -> list[structlog.types.Processor]:
-    """Processors comunes a DEV y PROD."""
     procs: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
@@ -115,7 +83,6 @@ def _shared_processors(env: str) -> list[structlog.types.Processor]:
         structlog.processors.UnicodeDecoder(),
         redact_secrets_processor,
     ]
-    # Siempre inyectamos phase=ia_doblaje_engine + version como contexto base
     procs.insert(
         1,
         lambda l, m, ed: {  # noqa: E731
@@ -147,7 +114,6 @@ def _prod_processors() -> list[structlog.types.Processor]:
 
 
 def _json_dumps_safe(obj: Any, **kw: Any) -> str:
-    """Wrapper json.dumps con fallback por si structlog recibe no serializable."""
     import json
 
     default_kw: dict[str, Any] = {
@@ -163,10 +129,6 @@ def _json_dumps_safe(obj: Any, **kw: Any) -> str:
     return json.dumps(obj, **default_kw)
 
 
-# =============================================================================
-# API Publica
-# =============================================================================
-
 _INITIALIZED: bool = False
 _INITIALIZED_KWARGS: dict[str, Any] = {}
 
@@ -176,13 +138,6 @@ def setup_logging(
     fmt: str = "human",
     env: str = "dev",
 ) -> None:
-    """Inicializa logging estructurado.
-
-    Args:
-        level:  DEBUG | INFO | WARNING | ERROR | CRITICAL (case insensitive).
-        fmt:    "human" (dev ConsoleRenderer color) | "json" (prod NDJSON).
-        env:    "dev" | "staging" | "production" (etiqueta phase inyectada).
-    """
     global _INITIALIZED, _INITIALIZED_KWARGS
 
     norm_level = str(level).upper()
@@ -198,11 +153,8 @@ def setup_logging(
     except (TypeError, AttributeError):
         lvl = logging.INFO
 
-    # --- structlog configure ---
     processors = _dev_processors() if norm_fmt == "human" else _prod_processors()
 
-    # Ultimo paso para stdlib bridge: si processor final no es renderer, error.
-    # Para stdlib handler, necesitamos separar renderer para ProcessingFormatter.
     renderer = processors[-1]
     non_render_processors = processors[:-1]
 
@@ -213,7 +165,6 @@ def setup_logging(
         cache_logger_on_first_use=True,
     )
 
-    # --- stdlib logging root handler ---
     formatter = structlog.stdlib.ProcessorFormatter(
         processor=renderer,
         foreign_pre_chain=non_render_processors,
@@ -227,7 +178,6 @@ def setup_logging(
     root.addHandler(handler)
     root.setLevel(lvl)
 
-    # Silenciar ruidos de terceros a WARNING+
     for noisy in ("httpx", "urllib3", "httpcore", "huggingface_hub", "filelock", "torch"):
         logging.getLogger(noisy).setLevel(max(lvl, logging.WARNING))
 
@@ -236,7 +186,6 @@ def setup_logging(
 
 
 def get_logger(name: str = "ia-doblaje") -> structlog.stdlib.BoundLogger:
-    """Retorna BoundLogger de structlog. Si no se inicializo, setup default."""
     global _INITIALIZED
     if not _INITIALIZED:
         setup_logging()
@@ -245,8 +194,6 @@ def get_logger(name: str = "ia-doblaje") -> structlog.stdlib.BoundLogger:
 
 
 def bind_context(**kwargs: Any) -> structlog.stdlib.BoundLogger:
-    """Agrega variables de contexto GLOBALES (thread/greenlet safe)."""
-    # Filtrar secretos en contexto para evitar leak en logs futuros.
     safe: dict[str, Any] = {}
     for k, v in kwargs.items():
         if _is_secret_key(str(k)):
@@ -258,18 +205,12 @@ def bind_context(**kwargs: Any) -> structlog.stdlib.BoundLogger:
 
 
 def unbind_context(*keys: str) -> None:
-    """Remueve keys del contexto global."""
     structlog.contextvars.unbind_contextvars(*keys)
 
 
 def reset_context() -> None:
-    """Limpia TODO el contexto global (usar entre jobs distintos)."""
     structlog.contextvars.clear_contextvars()
 
-
-# =============================================================================
-# Export
-# =============================================================================
 
 __all__ = [
     "setup_logging",

@@ -1,4 +1,3 @@
-"""Subtítulos en vivo generados desde el archivo, por delante del cabezal."""
 from __future__ import annotations
 
 from typing import Any
@@ -14,8 +13,7 @@ from app.presentation.api.live import (
 )
 
 SR = 16_000
-DURATION = 600_000  # 10 min
-# Diálogo de tiempos conocidos sobre el vídeo completo.
+DURATION = 600_000
 DIALOGUE = [
     (1_000, 2_800, "hello there"),
     (4_000, 5_600, "welcome"),
@@ -45,7 +43,6 @@ class Fakes:
         return np.full(int((end - start) * SR / 1000), 0.3, dtype=np.float32)
 
     def transcribe(self, audio: Any, offset_ms: int, _language: str | None) -> list[Any]:
-        """Como Whisper: sólo oye lo que cae en la ventana; corta en el borde."""
         end = offset_ms + int(audio.size * 1000 / SR)
         self.transcribed.append((offset_ms, end))
         out = []
@@ -119,7 +116,6 @@ def test_el_primer_subtitulo_sale_de_la_primera_pasada_desde_el_cabezal() -> Non
     assert sub.step()
     first = fakes.events[0]
     assert first["type"] == "cues" and first["language"] == "en"
-    # Una sola pasada de Whisper basta para el primer subtítulo.
     assert len(fakes.transcribed) == 1
     assert (first["cues"][0]["start_ms"], first["cues"][0]["end_ms"]) == (1_000, 2_800)
 
@@ -173,7 +169,6 @@ def test_traduce_solo_el_idioma_que_se_ve_y_conserva_los_tiempos() -> None:
     by_time = {(c["start_ms"], c["end_ms"]): c["text"] for c in en}
     for cue in es:
         assert by_time[(cue["start_ms"], cue["end_ms"])] in cue["text"]
-    # La traducción del tramo del cabezal llega antes de seguir transcribiendo lejos.
     assert fakes.transcribed[-1][0] < 20_000
 
 
@@ -246,7 +241,6 @@ def test_silencio_avanza_sin_llamar_al_asr() -> None:
 
 
 def test_los_adaptadores_reales_exponen_lo_que_usa_el_motor() -> None:
-    """Sin cargar modelos: el motor sólo llama a métodos que existen."""
     from app.infrastructure.audio.faster_whisper_asr_adapter import FasterWhisperSmallASRAdapter
     from app.infrastructure.translation.m2m100_translation_adapter import M2M100TranslatorAdapter
 
@@ -289,8 +283,6 @@ def test_ids_estables_e_idempotentes() -> None:
     assert len(sub.cues["es"]) == before, "volver a publicar no duplica"
 
 
-# --- Un proceso por proyecto ------------------------------------------------
-
 def test_runner_unico_por_proyecto_instantanea_y_secuencia() -> None:
     import threading
 
@@ -317,7 +309,7 @@ def test_runner_unico_por_proyecto_instantanea_y_secuencia() -> None:
         runner, created = live.ensure_runner("p-unico", build)
         again, created_again = live.ensure_runner("p-unico", build)
         assert created and not created_again and again is runner, "sin procesos duplicados"
-        runner.set_position(0, "es")  # antes de estar construido: se guarda
+        runner.set_position(0, "es")
         received: list[dict] = []
         snapshot, detach = runner.attach(received.append)
         assert snapshot["type"] == "snapshot" and snapshot["seq"] == 0
@@ -327,7 +319,6 @@ def test_runner_unico_por_proyecto_instantanea_y_secuencia() -> None:
         seqs = [e["seq"] for e in received]
         assert seqs == sorted(seqs) and len(seqs) == len(set(seqs)), "secuencia ordenada y sin repetir"
         assert received[-1]["type"] == "completed"
-        # Un cliente que llega tarde recibe TODO en la instantánea.
         late, _ = runner.attach(lambda _e: None)
         assert late["complete"] and late["tracks"]["es"] and late["seq"] == seqs[-1]
         detach()

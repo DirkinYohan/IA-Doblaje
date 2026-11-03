@@ -1,8 +1,3 @@
-"""UseCase RunMetricsAggregationUseCase — Capa APPLICATION (T12 Step 12 Metrics).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO importa psutil/torch/pyannote/numpy/speechbrain (clean architecture).
-"""
 from __future__ import annotations
 
 import time
@@ -30,15 +25,6 @@ log = get_logger("app.application.use_cases.aggregate_metrics")
 
 @dataclass(frozen=True, slots=True)
 class RunMetricsAggregationUseCase:
-    """Orquesta Step 12 Metrics Aggregation. Inmutable.
-
-    Input: snapshot + entidades upstream. Output: MetricsResult frozen 2-SHA.
-    """
-
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
-
     def run(
         self,
         snapshot: RuntimeMetricsSnapshot,
@@ -53,7 +39,6 @@ class RunMetricsAggregationUseCase:
         job_id: str | None = None,
         metrics_enabled: bool = True,
     ) -> MetricsResult:
-        # 1) None inputs
         for name, obj in (
             ("snapshot", snapshot),
             ("language", language),
@@ -70,24 +55,20 @@ class RunMetricsAggregationUseCase:
         bind_context(job_id=job_id, phase="METRICS", model=MODEL_LABEL_METRICS_V1_LITERAL)
         t0 = time.perf_counter()
 
-        # 2) Chain of custody
         source = str(alignment.source_preprocessed_sha256).lower()
         if str(validation.source_preprocessed_sha256).lower() != source:
             raise ValidationFailedError(
                 "Chain of Custody rota T11↔T12: ValidationResult.source != alignment.source."
             )
 
-        # 3) Disabled metrics
         if not metrics_enabled:
             return self._build_disabled(source, job_id)
 
-        # 4) Runtime obligatorio
         if snapshot.processing_wall_time_sec <= 0:
             raise ValidationFailedError(
                 "RunMetricsAggregationUseCase: processing_wall_time_sec obligatorio y > 0."
             )
 
-        # 5) Métricas derivadas
         audio_duration_sec = round(float(alignment.total_duration_ms) / 1000.0, 6)
         rtf = (
             round(float(snapshot.processing_wall_time_sec) / audio_duration_sec, 6)
@@ -117,7 +98,6 @@ class RunMetricsAggregationUseCase:
         language_detection_confidence = round(float(language.confidence), 6)
         overall_quality_score = round(float(quality.overall_quality_score), 6)
 
-        # word_count_confidence_ge_08: no disponible (WORD_TS_APLAZADO)
         word_count_confidence_ge_08 = 0
         metadata: dict[str, object] = {"word_confidence_unavailable": True}
 
@@ -166,13 +146,9 @@ class RunMetricsAggregationUseCase:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _build_disabled(source: str, job_id: str | None) -> MetricsResult:
-        """metrics_enabled=False → resultado deshabilitado (sin inventar métricas)."""
         return MetricsResult(
             source_preprocessed_sha256=source,
             validation_reference_sha256=source,

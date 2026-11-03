@@ -1,7 +1,3 @@
-"""Value Objects Structured JSON Output Step 13 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (sin IA, sin filesystem).
-"""
 from __future__ import annotations
 
 import re
@@ -50,8 +46,6 @@ OutputFilename = Annotated[str, BeforeValidator(_validate_output_filename)]
 
 
 class OutputFileRecord(BaseModel):
-    """Registro de un archivo JSON escrito: nombre + SHA256."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     filename: OutputFilename = Field(..., description="Nombre del archivo (ej. analysis.json).")

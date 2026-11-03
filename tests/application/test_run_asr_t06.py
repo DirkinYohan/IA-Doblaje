@@ -1,13 +1,3 @@
-"""Tests T06 Application RunASRUseCase — FAKE ASRPort.
-- 16+ tests
-- NO torch / faster_whisper / numpy para UseCase
-- Fake adapter que devuelve ASRResult mockeado
-- Chain of custody 3 variantes mismatch
-- strict / non-strict
-- silent fallback num_intervals=0 (NO WhisperModel llamado)
-- determinismo
-- propagation ModelLoadError / ASRProcessingError / ValidationFailedError
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -42,13 +32,9 @@ _SHA_B = "b" * 16 + "0" * 48
 _SHA_C = "c" * 16 + "0" * 48
 
 
-# =============================================================================
-# Factories
-# =============================================================================
 def _dummy_wav(tmp_path_factory) -> Path:
     wp = tmp_path_factory.mktemp("asrusecase") / "in.wav"
     wp.write_bytes(
-        # 44 byte header wav 16kHz mono 16-bit 50ms = 1600 samples = 3200 bytes data
         b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     )
     return wp
@@ -79,7 +65,7 @@ def _build_prep(
 def _build_vad(
     *,
     source_sha: str,
-    intervals,  # list[(start_ms, end_ms, conf)] or []
+    intervals,
     duration_ms: int = 5000,
 ):
     vints = tuple(
@@ -138,9 +124,6 @@ def _build_lid(
     )
 
 
-# =============================================================================
-# Fake ASRPort (SUCCESS siempre que no sea error)
-# =============================================================================
 @dataclass
 class FakeOKASRPort:
     model_loaded_called: int = 0
@@ -197,9 +180,6 @@ class FakeErrorASRPort:
         raise self.exc_class(self.exc_msg)
 
 
-# =============================================================================
-# Tests Application — 16+
-# =============================================================================
 class TestRunASRUseCaseHappyPath:
     def test_happy_path_es(self, tmp_path_factory):
         wp = _dummy_wav(tmp_path_factory)
@@ -227,7 +207,6 @@ class TestRunASRUseCaseHappyPath:
         fake = FakeOKASRPort()
         uc = RunASRUseCase(asr_port=fake)
         res = uc.run(prep, vad, lid)
-        # Result OK; und pasa al adapter -> usa auto detect (adapter resuelve)
         assert res.strategy == "full_audio"
 
 
@@ -307,8 +286,7 @@ class TestRunASRUseCaseSilentFallback:
         fake = FakeOKASRPort()
         uc = RunASRUseCase(asr_port=fake, strict=True)
         res = uc.run(prep, vad, lid)
-        # Model NO debe ser llamado; strategy = silent fallback, conf=0, vacío
-        assert fake.model_loaded_called == 0  # KEY: no carga ASR
+        assert fake.model_loaded_called == 0
         assert res.strategy == "asr_silent_fallback"
         assert res.transcript_text == ""
         assert res.num_segments == 0

@@ -1,8 +1,3 @@
-"""Tests unitarios T11 Application RunValidationUseCase.
-
-No requiere IA. Entidades sintéticas T04/T06/T08/T09/T10. Cubre VC01..VC11,
-Quality FAILED/strict/force-save y AST.
-"""
 from __future__ import annotations
 
 import ast
@@ -58,7 +53,6 @@ def _alignment(segments=None, num_segments=0, num_aligned=0, num_unassigned=0, t
 
 
 def _alignment_raw(segments=None, num_segments=0, num_aligned=0, num_unassigned=0, total_ms=10000, lang="es"):
-    """AlignmentResult sin validación (para checks defensivos)."""
     segs = tuple(segments or [])
     return AlignmentResult.model_construct(
         strategy="weighted_overlap_majority_vote",
@@ -156,7 +150,6 @@ def _quality(level=QualityLevel.PASSED, score=1.0, rules=None):
 
 
 def _quality_raw(level=QualityLevel.PASSED, score=1.0, rules=None, total_ms=10000, num_passed=11):
-    """QualityResult sin validación (para checks defensivos)."""
     return QualityResult.model_construct(
         strategy=QUALITY_STRATEGY_RULES,
         source_preprocessed_sha256=_SHA,
@@ -182,11 +175,6 @@ def _run(quality, alignment, vad, asr, diar, force_save=False, thresholds=None, 
     return RunValidationUseCase(strict_quality=strict_quality).run(
         quality, alignment, vad, asr, diar, force_save=force_save, thresholds=thresholds
     )
-
-
-# =============================================================================
-# Checks VC01..VC11 (PASS/FAIL)
-# =============================================================================
 
 
 class TestChecks:
@@ -253,7 +241,6 @@ class TestChecks:
             _run(_quality(), _alignment([_seg()], num_segments=1, num_aligned=1, lang="en"), _vad(), _asr(lang="es"), _diarization())
 
     def test_vc09_level_mismatch(self):
-        # score 1.0 pero level failed → inconsistente (usar raw para saltar validación upstream)
         q = _quality_raw(level=QualityLevel.FAILED, score=1.0)
         with pytest.raises(ValidationFailedError):
             _run(q, _alignment([_seg()], num_segments=1, num_aligned=1), _vad(), _asr(), _diarization(), force_save=True)
@@ -291,10 +278,9 @@ class TestQualityFailed:
         q = _quality(level=QualityLevel.FAILED, score=0.1)
         r = _run(q, _alignment([_seg()], num_segments=1, num_aligned=1), _vad(), _asr(), _diarization(), force_save=True)
         assert r.validation_status == "failed"
-        assert r.validation_passed is True  # sin errores estructurales
+        assert r.validation_passed is True
 
     def test_structural_error_force_save_raises(self):
-        # error estructural (VC03) NO es ignorado por force_save
         q = _quality()
         q = QualityResult(
             strategy=QUALITY_STRATEGY_RULES,
@@ -375,17 +361,11 @@ class TestASTAudit:
             assert not (imports & forbidden), f"{p} importa prohibido: {imports & forbidden}"
 
 
-# =============================================================================
-# Cobertura adicional: casos límite y passthrough
-# =============================================================================
-
-
 class TestAdditional:
     def test_vc02_job_id_present_consistent(self):
         q = _quality()
         a = _alignment([_seg()], num_segments=1, num_aligned=1)
         r = _run(q, a, _vad(), _asr(), _diarization())
-        # Todos los job_id son None → consistente (VC02 passed)
         assert r.validation_passed is True
 
     def test_vc04_exact_equality(self):
@@ -409,13 +389,11 @@ class TestAdditional:
         assert r.validation_passed is True
 
     def test_vc09_score_boundaries(self):
-        # score 0.80 exacto → passed (nivel correcto)
         q = _quality(level=QualityLevel.PASSED, score=0.80)
         r = _run(q, _alignment([_seg()], num_segments=1, num_aligned=1), _vad(), _asr(), _diarization())
         assert r.validation_passed is True
 
     def test_vc10_not_applicable_derived(self):
-        # rule_results con 2 not_applicable, contadores correctos → VC10 passed
         rules = list(_all_rules_passed())
         rules[6] = QualityRuleResult(rule_code="QR07", severity="WARNING", passed=True, applicable=False, occurrences=0, penalty=0.0, reason="x")
         rules[7] = QualityRuleResult(rule_code="QR08", severity="WARNING", passed=True, applicable=False, occurrences=0, penalty=0.0, reason="x")
@@ -450,4 +428,3 @@ class TestAdditional:
         r = _run(_quality(), _alignment([_seg()], num_segments=1, num_aligned=1), _vad(), _asr(), _diarization())
         assert r.num_checks == 11
         assert len(r.check_results) == 11
-

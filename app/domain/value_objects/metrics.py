@@ -1,7 +1,3 @@
-"""Value Objects Metrics Step 12 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (sin IA, sin psutil/torch).
-"""
 from __future__ import annotations
 
 import math
@@ -18,14 +14,8 @@ from pydantic.functional_validators import BeforeValidator
 
 from app.core.constants import PipelineStep
 
-# 14 keys exactas de PipelineStep (identificadores .name)
 PIPELINE_STEP_NAMES: tuple[str, ...] = tuple(s.name for s in PipelineStep)
 _ALLOWED_STEP_NAMES = frozenset(PIPELINE_STEP_NAMES)
-
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_non_negative_float(v: object) -> float:
@@ -89,17 +79,7 @@ def _validate_score_0_1(v: object) -> float:
 MetricConfidence = Annotated[float, BeforeValidator(_validate_score_0_1)]
 
 
-# ---------------------------------------------------------------------------
-# 2) RuntimeMetricsSnapshot (snapshot YA medido por Infrastructure/orquestador)
-# ---------------------------------------------------------------------------
-
-
 class RuntimeMetricsSnapshot(BaseModel):
-    """Snapshot de métricas de runtime, medido por Infrastructure/orquestador.
-
-    T12 NO mide CPU/GPU/RAM; solo agrega lo ya medido.
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     processing_wall_time_sec: MetricNonNegativeFloat = Field(..., description="Tiempo wall-clock total.")
@@ -112,7 +92,6 @@ class RuntimeMetricsSnapshot(BaseModel):
     cpu_utilization_avg_percent: MetricPercent = Field(0.0, description="CPU promedio %.")
     gpu_utilization_avg_percent: MetricPercent = Field(0.0, description="GPU promedio %.")
 
-    # Compliance (del orquestador, no deducido)
     profile_requested: str = Field("", description="Perfil solicitado.")
     profile_applied: str = Field("", description="Perfil aplicado.")
     profile_downgrade_applied: bool = Field(False, description="True si hubo downgrade explícito.")

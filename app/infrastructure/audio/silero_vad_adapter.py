@@ -1,17 +1,3 @@
-"""Silero VAD v5.1 Adapter — Capa INFRASTRUCTURE T04 Step 04.
-
-Implementa VoiceActivityDetectorPort.
-
-REGLAS EXIGIDAS T04:
-* torch.jit.load(..., weights_only=True) (seguridad)
-* Ruta: PathsConfig.models_cache_dir / "silero_vad_v5.1.jit"
-* NO descargar.
-* NO HF.
-* NO urllib/requests.
-* int16 WAV → float32 [-1,1] conversion segura.
-* merge proximal < VadThresholds.merge_proximal_ms (200 ms default).
-* silence segments complementarios.
-"""
 from __future__ import annotations
 
 import math
@@ -34,14 +20,7 @@ from app.domain.value_objects.vad import (
 MODEL_FILENAME = "silero_vad_v5.1.jit"
 
 
-# ---------------------------------------------------------------------------
-# Default VadModelLoaderPort via torch.jit.load (weights_only=True)
-# ---------------------------------------------------------------------------
-
-
 class TorchJitModelLoader:
-    """Infra-only. Usa torch.jit.load + weights_only=True. No descarga."""
-
     def load(self, model_path: Path, device: str) -> Any:
         model_path = Path(model_path)
         if not model_path.is_file():
@@ -53,21 +32,16 @@ class TorchJitModelLoader:
         if model_path.stat().st_size <= 0:
             raise ModelLoadError(f"Modelo JIT vacío o corrupto: {model_path!s}")
         try:
-            import torch  # runtime import, domain no lo ve
+            import torch
         except ImportError as exc:  # pragma: no cover - dependencia runtime
             raise ModelLoadError(
                 "torch no instalado. Requiere venv con ia-doblaje-engine[vad] extra."
             ) from exc
         try:
             dev = "cpu" if not device else str(device)
-            # weights_only=True: seguridad contra pickles con código arbitrario.
-            # Compatibilidad: PyTorch < 2.6 no soporta weights_only en torch.jit.load;
-            # en ese caso específico (TypeError por argumento no soportado) se
-            # reintenta sin él. Los errores de corrupción siguen propagando ModelLoadError.
             from app.infrastructure.audio.jit_loader import load_jit_confined
 
             model = load_jit_confined(torch, Path(model_path), dev)
-            # Silero v5 jit tiene un método .eval()
             if hasattr(model, "eval"):
                 model.eval()
             return model
@@ -79,18 +53,9 @@ class TorchJitModelLoader:
             ) from exc
 
 
-# ---------------------------------------------------------------------------
-# Helpers merge + silences
-# ---------------------------------------------------------------------------
-
-
 def _merge_proximal_intervals(
     intervals: list[dict[str, Any]], merge_gap_ms: int
 ) -> list[dict[str, Any]]:
-    """Merge de intervalos list[dict(start_ms,end_ms,max_conf,sample_count)].
-
-    No requiere numpy. Pure Python. Determinístico.
-    """
     if not intervals:
         return []
     if merge_gap_ms <= 0:
@@ -108,7 +73,6 @@ def _merge_proximal_intervals(
             continue
         gap = int(it["start_ms"]) - int(cur["end_ms"])
         if 0 <= gap <= int(merge_gap_ms):
-            # Fusionar
             cur["end_ms"] = max(int(cur["end_ms"]), int(it["end_ms"]))
             cur["max_conf"] = max(float(cur["max_conf"]), float(it["max_conf"]))
             cur["sample_count"] = int(cur["sample_count"]) + int(it["sample_count"])
@@ -128,7 +92,6 @@ def _merge_proximal_intervals(
 def _build_silences(
     intervals_sorted: list[dict[str, Any]], total_duration_ms: int
 ) -> list[dict[str, Any]]:
-    """Complemento. Devuelve list[dict(start_ms,end_ms,idx_before,idx_after)]."""
     silences: list[dict[str, Any]] = []
     if total_duration_ms <= 0:
         return []
@@ -158,14 +121,7 @@ def _build_silences(
     return silences
 
 
-# ---------------------------------------------------------------------------
-# SileroVADAdapter
-# ---------------------------------------------------------------------------
-
-
 class SileroVADAdapter(VoiceActivityDetectorPort):
-    """Adapter Silero VAD v5.1 JIT. 16kHz mono s16 input."""
-
     def __init__(
         self,
         *,
@@ -180,13 +136,9 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
             if isinstance(device_override, str) and device_override
             else "cpu"
         )
-        # lazy singleton cache (no global state mutable outside instance).
         self._model: Any | None = None
         self._model_path: Path | None = None
 
-    # ------------------------------------------------------------------
-    # Public
-    # ------------------------------------------------------------------
 
     def detect(
         self,
@@ -198,32 +150,23 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
     ) -> VadResult:
         thr: VadThresholds = thresholds or VadThresholds()
         t0 = time.perf_counter()
-        # (0) load model lazy (SIN DESCARGAR).
         model = self._get_model()
-        # (1) Leer WAV int16 PCM via soundfile + convertir a float32 [-1,1]
         audio_f32, sr, total_samples, total_duration_ms = self._read_audio(
             preprocessed, thr
         )
-        # (2) Obtener speech timestamps
-        import numpy as _np  # runtime, infra only
+        import numpy as _np
 
-        # Procedimiento oficial Silero VAD v5:
-        # audio_f32 shape [1, N] or [N] float32 rango [-1,1]
         try:
-            # Primero intentar usando paquete silero-vad si está instalado (get_speech_timestamps).
             timestamps = self._call_get_speech_timestamps(
                 model, audio_f32, sr, thr, total_duration_ms
             )
         except (ImportError, AttributeError, VADProcessingError):
-            # Fallback interno implementación directa iterando batches 512 samples.
             timestamps = self._get_speech_timestamps_manual(
                 model, audio_f32, sr, thr, total_duration_ms
             )
 
-        # (3) Merge proximal
         merged = _merge_proximal_intervals(timestamps, int(thr.merge_proximal_ms))
 
-        # (4) VoiceIntervals (frozen)
         voice_intervals: tuple[VoiceInterval, ...] = tuple(
             VoiceInterval(
                 start_ms=int(x["start_ms"]),
@@ -234,7 +177,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
             )
             for x in merged
         )
-        # (5) Silences complement
         total_dur = int(total_duration_ms)
         silences_raw = _build_silences(
             [
@@ -253,7 +195,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
             for s in silences_raw
         )
 
-        # (6) Stats
         total_speech = sum(int(vi.duration_ms) for vi in voice_intervals)
         total_silence = sum(int(s.duration_ms) for s in silence_segments)
         speech_ratio = (total_speech / total_dur) if total_dur > 0 else 0.0
@@ -278,7 +219,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
             except Exception:  # noqa: BLE001
                 pass
 
-        # (7) Build result frozen. Chain of custody sha256.
         return VadResult(
             source_preprocessed_sha256=str(preprocessed.sha256),
             voice_intervals=voice_intervals,
@@ -295,9 +235,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
             duration_ms=int(total_dur),
         )
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _get_model_path(self) -> Path:
         cache_dir = Path(self._settings.paths.models_cache_dir)
@@ -308,7 +245,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
         if self._model is not None:
             return self._model
         path = self._get_model_path()
-        # Loader load(). Regla: NO DESCARGAR. Loader solo levanta ModelLoadError si no existe.
         self._model = self._loader.load(path, self._device)
         self._model_path = path
         return self._model
@@ -318,10 +254,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
         preprocessed: PreprocessedAudio,
         thr: VadThresholds,
     ) -> tuple[Any, int, int, int]:
-        """Retorna (audio_f32 shape[1,N] numpy, sr_hz, sample_count, duration_ms).
-
-        Usa soundfile.read dtype='int16'. Requiere extra [vad] instalado.
-        """
         try:
             import numpy as np
             import soundfile as sf
@@ -350,10 +282,8 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
         if arr.ndim > 1:
             arr = arr[:, 0] if arr.shape[1] >= 1 else arr.reshape(-1)
         total_samples = int(arr.shape[0])
-        # Conversión segura int16 [-32768,32767] → float32 [-1.0, 1.0]
         f32 = arr.astype(np.float32) / 32768.0
         f32 = np.clip(f32, -1.0, 1.0).astype(np.float32)
-        # Silero espera [batch=1, samples]
         audio_f32 = f32.reshape(1, -1)
         total_duration_ms = int(round(total_samples / sr_hz * 1000.0))
         return audio_f32, sr_hz, total_samples, total_duration_ms
@@ -366,7 +296,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
         thr: VadThresholds,
         total_duration_ms: int,
     ) -> list[dict[str, Any]]:
-        """Usa silero_vad.get_speech_timestamps si está instalado."""
         import numpy as _np
 
         try:
@@ -383,7 +312,7 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
                 sampling_rate=int(sr),
                 min_speech_duration_ms=int(thr.min_speech_duration_ms),
                 min_silence_duration_ms=int(thr.min_silence_between_ms),
-                window_size_samples=512,  # Oficial Silero v5, 32 ms 16kHz
+                window_size_samples=512,
                 speech_pad_ms=0,
                 return_seconds=False,
             )
@@ -391,13 +320,11 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
             raise VADProcessingError(
                 f"get_speech_timestamps falló: {exc!r}"
             ) from exc
-        # Convertir a nuestra representación list[dict[start_ms,end_ms,max_conf,sample_count]]
         sr_hz = int(sr)
         out: list[dict[str, Any]] = []
         for item in ts_raw:
             s_sample = int(item.get("start", 0))
             e_sample = int(item.get("end", 0))
-            # Inferir max confidence aprox: threshold * 1.2 (no hay valor directo), o 0.9 si None
             out.append(
                 {
                     "start_ms": int(round(s_sample / sr_hz * 1000.0)),
@@ -416,16 +343,10 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
         thr: VadThresholds,
         total_duration_ms: int,
     ) -> list[dict[str, Any]]:
-        """Fallback manual: iterar ventanas 512 samples y threshold.
-
-        Funciona tanto con torch instalado como sin él (para tests unitarios).
-        - Con torch: envía tensor, retorna probs.
-        - Sin torch: espera que el adapter/mock acepte numpy array y devuelva numpy array.
-        """
         import numpy as np
 
         sr_hz = int(sr)
-        window = 512  # 32 ms a 16 kHz
+        window = 512
         hop = window
         threshold = float(thr.speech_threshold)
 
@@ -461,14 +382,12 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
         samples = int(audio_f32.shape[-1])
         if samples <= 0:
             return []
-        # Intento 1: audio completo (mock tests devuelve array de probs por ventana)
         try:
             probs_out = model(_to_input(audio_f32), sr_hz)
             p_np: np.ndarray = _to_numpy(probs_out)
             p_1d = p_np.reshape(-1)
             if int(p_1d.shape[0]) <= 0:
                 raise ValueError("empty probs")
-            # Usar este path
             use_full = True
         except Exception:  # noqa: BLE001
             p_1d = np.zeros(0, dtype=np.float32)
@@ -512,7 +431,6 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
                     }
                 )
         else:
-            # Intento 2: por ventanas.
             flags: list[bool] = []
             per_window_max: list[float] = []
             for i in range(0, samples, hop):
@@ -564,14 +482,12 @@ class SileroVADAdapter(VoiceActivityDetectorPort):
                     }
                 )
 
-        # min_speech_duration_ms filter
         min_speech_ms = int(thr.min_speech_duration_ms)
         intervals = [
             it
             for it in intervals
             if (int(it["end_ms"]) - int(it["start_ms"])) >= min_speech_ms
         ]
-        # min_silence_between_ms merge
         gap = int(thr.min_silence_between_ms)
         if gap > 0:
             merged_2: list[dict[str, Any]] = []

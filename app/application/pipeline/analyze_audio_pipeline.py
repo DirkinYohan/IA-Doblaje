@@ -1,10 +1,3 @@
-"""Orquestador AnalyzeAudioPipeline — Integración end-to-end T01→T14.
-
-CAPA DE INTEGRACIÓN. Coordina los 14 pasos ya implementados (T01–T14) sin
-contener lógica de IA propia. Cada Step sigue siendo responsable de su lógica.
-
-NO modifica resultados upstream. T14 se ejecuta en `finally`.
-"""
 from __future__ import annotations
 
 import json
@@ -50,8 +43,6 @@ log = get_logger("app.application.pipeline.analyze_audio_pipeline")
 
 @dataclass
 class AnalyzeAudioPipeline:
-    """Orquestador T01→T14. Solo coordina (wiring + secuencia)."""
-
     media_prep: AnalyzeMediaPrepUseCase
     vad: RunVoiceActivityDetectionUseCase
     language: RunLanguageDetectionUseCase
@@ -67,14 +58,11 @@ class AnalyzeAudioPipeline:
     settings: AppSettings
     path_manager: PathManager
     step_times: dict[str, float] = field(default_factory=dict)
-    translation: Any | None = None  # RunTranslationUseCase (T15) — opcional
+    translation: Any | None = None
     cancel_event: Any | None = None
     progress_callback: Any | None = None
     asr_device: str = "cpu"
 
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -83,11 +71,9 @@ class AnalyzeAudioPipeline:
         job_id: str | None = None,
         force_save: bool = False,
     ) -> dict[str, Any]:
-        """Ejecuta T01→T14. Retorna un resumen (no muta resultados upstream)."""
         jid: str = job_id or generate_job_id()
         bind_context(job_id=jid, phase="PIPELINE")
 
-        # Configuración real
         general = self.settings.general
         safety = self.settings.safety
         output_cfg = self.settings.output
@@ -99,9 +85,7 @@ class AnalyzeAudioPipeline:
         results: dict[str, Any] = {}
         temp_root = str(self.path_manager.data_temp_dir)
 
-        # T14 se ejecuta SIEMPRE (finally), respetando flags
         try:
-            # T01–T03
             results["media_prep"] = self._run_step(
                 "T01_T02_T03",
                 lambda: self.media_prep.execute(
@@ -115,21 +99,17 @@ class AnalyzeAudioPipeline:
             media_prep: MediaPrepResult = results["media_prep"]
             prep = media_prep.preprocessed_audio
 
-            # T04 VAD
             results["vad"] = self._run_step(
                 "T04_VAD",
                 lambda: self.vad.execute(media_prep, job_id=jid),
             )
 
-            # T05 LID
             results["language"] = self._run_step(
                 "T05_LID",
                 lambda: self.language.execute(media_prep, results["vad"], job_id=jid),
             )
-            # Idioma realmente detectado (para persistirlo en el proyecto).
             results["detected_language"] = _detected_language_code(results["language"])
 
-            # T06 ASR
             results["asr"] = self._run_step(
                 "T06_ASR",
                 lambda: self.asr.run(
@@ -137,7 +117,6 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T07 Timestamps
             results["timestamps"] = self._run_step(
                 "T07_TIMESTAMPS",
                 lambda: self.timestamps.run(
@@ -145,13 +124,11 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T08 Diarization
             results["diarization"] = self._run_step(
                 "T08_DIARIZATION",
                 lambda: self.diarization.run(prep, results["vad"], job_id=jid),
             )
 
-            # T09 Alignment
             results["alignment"] = self._run_step(
                 "T09_ALIGNMENT",
                 lambda: self.alignment.run(
@@ -159,7 +136,6 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T10 Quality
             results["quality"] = self._run_step(
                 "T10_QUALITY",
                 lambda: self.quality.run(
@@ -171,7 +147,6 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T11 Validation
             results["validation"] = self._run_step(
                 "T11_VALIDATION",
                 lambda: self.validation.run(
@@ -185,12 +160,10 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # Runtime metrics snapshot (mediciones reales, stdlib)
             snapshot = self._build_runtime_snapshot(
                 media_prep, results["asr"], results["vad"], results["diarization"],
             )
 
-            # T12 Metrics
             results["metrics"] = self._run_step(
                 "T12_METRICS",
                 lambda: self.metrics.run(
@@ -207,7 +180,6 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T13 Structured JSON Output
             output_dir = str(self.path_manager.data_output_dir / jid)
             results["output"] = self._run_step(
                 "T13_OUTPUT",
@@ -228,7 +200,6 @@ class AnalyzeAudioPipeline:
                 ),
             )
 
-            # T15 + subtítulos. Un fallo aquí es PARTIAL, nunca SUCCESS.
             results["translation_errors"] = []
             results["translations"] = []
             if self.translation is not None:
@@ -320,7 +291,6 @@ class AnalyzeAudioPipeline:
             return results
 
         finally:
-            # T14 Temp Cleanup (SIEMPRE)
             try:
                 cleanup_result = self.cleanup.run(
                     temp_root,
@@ -334,12 +304,8 @@ class AnalyzeAudioPipeline:
                 log.error("t14_cleanup_security_error", extra={"error": str(exc)})
                 results["cleanup"] = None
 
-    # ------------------------------------------------------------------
-    # HELPERS
-    # ------------------------------------------------------------------
 
     def _notify(self, step_name: str, elapsed: float, phase: str) -> None:
-        """Notifica progreso. Admite callbacks de 2 (compat) o 3 argumentos."""
         if self.progress_callback is None:
             return
         try:
@@ -351,8 +317,6 @@ class AnalyzeAudioPipeline:
         if self.cancel_event is not None and self.cancel_event.is_set():
             raise PipelineCancelled("Procesamiento cancelado por el usuario.")
         t0 = time.perf_counter()
-        # El trabajo pesado ocurre dentro de fn(): anunciar el INICIO permite
-        # que la UI muestre la etapa real mientras se ejecuta.
         self._notify(step_name, 0.0, "start")
         try:
             result = fn()
@@ -373,16 +337,12 @@ class AnalyzeAudioPipeline:
         vad_result: VadResult,
         diarization: DiarizationResult,
     ) -> RuntimeMetricsSnapshot:
-        """Construye RuntimeMetricsSnapshot con mediciones reales (stdlib)."""
-        # wall time total = suma de step_times (aproximación real)
         wall = sum(self.step_times.values())
-        # audio duration desde preprocessed
         audio_sec = 0.0
         prep = media_prep.preprocessed_audio
         if prep is not None:
             audio_sec = float(prep.duration_sec)
 
-        # Mapear step_times internos a los 14 nombres oficiales de PipelineStep
         _STEP_NAME_MAP = {
             "T01_T02_T03": "MEDIA_VALIDATION",
             "T04_VAD": "VOICE_ACTIVITY_DETECTION",
@@ -424,7 +384,6 @@ class AnalyzeAudioPipeline:
 def build_pipeline(
     settings: AppSettings | None = None,
 ) -> AnalyzeAudioPipeline:
-    """Wiring: construye adapters reales (Infrastructure) y use cases (Application)."""
     settings = settings or get_settings()
 
     from app.infrastructure.audio.ffmpeg_adapters import (
@@ -491,7 +450,6 @@ def build_pipeline(
     output = RunStructuredJsonOutputUseCase(writer=JsonOutputWriter())
     cleanup = RunTempCleanupUseCase(cleanup=TempCleanupAdapter())
 
-    # T15 Translation Engine (opcional, según configuración)
     translation = None
     if getattr(settings.translation, "enabled", True):
         from app.application.use_cases.run_translation import RunTranslationUseCase
@@ -581,7 +539,6 @@ def _load_glossary(path: str) -> tuple[dict[str, dict[str, str]] | None, str | N
 
 
 def _detected_language_code(lid: Any) -> str:
-    """Extrae el código ISO del idioma detectado por T05. '' si no es fiable."""
     raw = getattr(lid, "language_code", None)
     if raw is None and isinstance(lid, dict):
         raw = lid.get("language_code")

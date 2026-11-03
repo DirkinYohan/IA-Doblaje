@@ -1,4 +1,3 @@
-"""Tests del modelo de progreso por etapas (presentation/api/progress.py)."""
 from __future__ import annotations
 
 import pytest
@@ -32,7 +31,6 @@ class TestPipelineStages:
         assert PIPELINE_STAGES[-1].percent == 100
 
     def test_cada_etapa_activa_tiene_nombre_propio(self) -> None:
-        """Ninguna etapa del pipeline puede quedar oculta tras un genérico."""
         keys = {spec.key for spec in PIPELINE_STAGES}
         for required in (
             "MEDIA_PREP", "VAD", "LID", "ASR", "TIMESTAMPS", "DIARIZATION",
@@ -75,7 +73,6 @@ class TestCanonicalKey:
         assert canonical_key("") == "PROCESSING"
 
     def test_orden_de_ejecucion_es_creciente(self) -> None:
-        """La secuencia real del pipeline nunca hace retroceder el porcentaje."""
         sequence = [
             "QUEUED", "PREPARING", "T01_MEDIA_VALIDATION", "T02_AUDIO_EXTRACTION",
             "T03_AUDIO_PREPROCESSING", "T04_VAD", "T05_LID", "T06_ASR",

@@ -1,9 +1,3 @@
-"""Carga el YAML del perfil y lo convierte en parámetros reales de ASR.
-
-El único modelo ASR local del proyecto es Faster-Whisper small. El YAML
-elige carpeta, compute type, beam, word timestamps y chunking. Si la carpeta
-no existe, el adapter falla al cargar: no hay sustitución silenciosa de modelo.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -70,7 +64,6 @@ def load_asr_profile(profile: str, configs_dir: Path) -> AsrProfileSpec:
 
 
 def resolve_compute_type(requested: str, device: str) -> tuple[str, str]:
-    """float16 en CPU no es estable en CTranslate2. El cambio queda explícito."""
     req = requested.strip()
     if device == "cpu" and req in {"float16", "int8_float16"}:
         return "int8", f"compute_type {req} no aplica en CPU; se usa int8"

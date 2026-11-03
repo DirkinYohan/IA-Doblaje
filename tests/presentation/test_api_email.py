@@ -1,4 +1,3 @@
-"""Correo de confirmación de cuenta y de recuperación de contraseña."""
 from __future__ import annotations
 
 import http.server
@@ -55,7 +54,6 @@ def _confirm(client: TestClient, mail_dir: Path, email: str = "ada@example.com")
 
 def test_no_se_entra_hasta_confirmar_el_correo(client: TestClient, mail_dir: Path) -> None:
     assert _register(client) == {"status": "verify", "email": "ada@example.com"}
-    # Registrarse no abre sesión.
     assert client.get("/api/auth/me").status_code == 401
     assert "ia_session" not in client.cookies
 
@@ -67,7 +65,6 @@ def test_no_se_entra_hasta_confirmar_el_correo(client: TestClient, mail_dir: Pat
     blocked = _login(client)
     assert blocked.status_code == 403 and "Confirma tu correo" in blocked.json()["detail"]
     assert client.get("/api/auth/me").status_code == 401
-    # Con una contraseña incorrecta no se revela que la cuenta existe.
     assert _login(client, password="incorrecta1").status_code == 401
 
     ok = client.post("/api/auth/verify-email", json={"token": mail["token"]})
@@ -90,10 +87,8 @@ def test_registrarse_otra_vez_sin_confirmar_reenvia_el_enlace(client: TestClient
     second = wait_for_mail(mail_dir, "verify", count=2)
     assert second["token"] != first["token"]
     assert client.post("/api/auth/verify-email", json={"token": second["token"]}).status_code == 200
-    # La contraseña no cambió: no se había demostrado de quién era la cuenta.
     assert _login(client, password="distinta123").status_code == 401
     assert _login(client).status_code == 200
-    # Ya confirmada, el correo está ocupado.
     client.post("/api/auth/logout")
     assert client.post("/api/auth/register", json={
         "name": "Ada", "email": "ada@example.com", "password": "secreto123", "confirm": "secreto123",
@@ -114,11 +109,9 @@ def test_reenviar_sin_sesion_y_limite(client: TestClient, mail_dir: Path) -> Non
     assert resent.json() == {"status": "sent"}
     second = wait_for_mail(mail_dir, "verify", count=2)
     assert second["subject"] == "Confirma tu correo en IA Doblaje"
-    # Cualquiera de los enlaces vigentes confirma; después ninguno vale.
     assert client.post("/api/auth/verify-email", json={"token": first["token"]}).status_code == 200
     assert client.post("/api/auth/verify-email", json={"token": second["token"]}).status_code == 400
 
-    # Ya confirmada o desconocida: la misma respuesta y ningún correo.
     before = len(read_mails(mail_dir))
     for email in ["ada@example.com", "nadie@example.com"]:
         assert client.post("/api/auth/resend-verification", json={"email": email}).json() == {"status": "sent"}
@@ -135,7 +128,6 @@ def test_cambiar_de_correo_se_aplica_al_confirmarlo(client: TestClient, mail_dir
     assert _login(client).status_code == 200
     changed = client.post("/api/auth/change-email", json={"email": "ada@nuevo.com", "password": "secreto123"})
     assert changed.json() == {"email": "ada@example.com", "pending_email": "ada@nuevo.com"}
-    # Hasta confirmarlo todo sigue igual: una errata no deja a nadie fuera.
     assert client.get("/api/auth/me").json()["email"] == "ada@example.com"
     client.post("/api/auth/logout")
     assert _login(client).status_code == 200
@@ -173,7 +165,6 @@ def test_no_se_puede_cambiar_a_un_correo_ocupado(client: TestClient, mail_dir: P
 
 
 def test_recuperar_contrasena_envia_el_enlace_y_confirma_el_correo(client: TestClient, mail_dir: Path) -> None:
-    # Aún sin confirmar: abrir el enlace del correo también lo demuestra.
     _register(client)
     assert client.post("/api/auth/forgot-password", json={"email": "ADA@example.com ", "locale": "es"}).status_code == 200
     mail = wait_for_mail(mail_dir, "reset", "ada@example.com")
@@ -190,8 +181,6 @@ def test_correo_desconocido_misma_respuesta_y_sin_envio(client: TestClient, mail
     assert response.status_code == 200 and response.json() == {"status": "sent"}
     assert [m for m in read_mails(mail_dir) if m.get("kind") == "reset"] == []
 
-
-# --- Brevo -----------------------------------------------------------------
 
 class _FakeBrevo:
     def __init__(self, status: int = 201) -> None:
@@ -274,7 +263,6 @@ def test_un_fallo_de_envio_no_rompe_el_registro(client: TestClient) -> None:
 
 
 def test_las_pruebas_nunca_envian_correos_reales(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Aunque `.env` tenga la clave de Brevo, la suite escribe a disco."""
     from app.core.env import load_project_env
     from app.presentation.api.main import create_app
 

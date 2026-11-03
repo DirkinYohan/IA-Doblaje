@@ -1,19 +1,3 @@
-"""Use Case: Media Prep Steps 01-03 — Capa APPLICATION.
-
-Orquesta:
-    Step 01. Media Validation  ← MediaValidatorPort (Domain)
-    Step 02. Audio Extraction  ← AudioExtractorPort (Domain)
-    Step 03. Preprocessing     ← AudioPreprocessorPort (Domain)
-
-SOLO depende de:
-    - Domain Entities / ValueObjects / Ports (INTERFACES ABSTRACTAS)
-    - T02 AppSettings (config)
-    - T02 structlog (logging)
-    - T02 PathManager (paths)
-
-NUNCA importa implementaciones concretas de Infrastructure
-(FFprobeMediaValidator, FFmpegAudioExtractor, etc). Se inyectan por constructor DI.
-"""
 from __future__ import annotations
 
 import time
@@ -44,21 +28,13 @@ from app.domain.interfaces.audio_ports import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Use Case
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class AnalyzeMediaPrepUseCase:
-    """Orquesta Steps 01-03 del Pipeline con Dependency Injection."""
-
     binary_resolver: BinaryResolverPort
     validator: MediaValidatorPort
     extractor: AudioExtractorPort
     preprocessor: AudioPreprocessorPort
 
-    # ---- execute -------------------------------------------------------
 
     def execute(
         self,
@@ -70,25 +46,6 @@ class AnalyzeMediaPrepUseCase:
         strict: bool = True,
         progress_cb: Any | None = None,
     ) -> MediaPrepResult:
-        """Ejecuta Steps 01 → 02 → 03.
-
-        Args:
-            input_path: Path input (puede ser relativo dentro de data/input o abs
-                permitido por PathManager).
-            job_id: Si None se genera via generate_job_id().
-            settings: Si None usa get_settings() + clear_settings_cache() defensivo.
-            logger: structlog BoundLogger; si None get_logger default.
-            force_keep_temp: Si True, PathManager.cleanup_job() NO se llama.
-            strict: Si True (default), cualquier error raisea. Si False,
-                devuelve MediaPrepResult con errors[] poblados y None en pasos
-                no completados. Útil para diagnóstico CLI.
-            progress_cb: Callable opcional ``(step_name) -> None`` invocado antes
-                de cada subpaso real, para que la UI no se quede congelada.
-
-        Returns:
-            MediaPrepResult frozen con todos los metadatos de Steps 01-03.
-        """
-
         def _emit(step: str) -> None:
             if progress_cb is None:
                 return
@@ -97,10 +54,8 @@ class AnalyzeMediaPrepUseCase:
             except Exception:  # noqa: BLE001
                 pass
 
-        # --- 0) Settings ----------------------------------------------------
         if settings is None:
             try:
-                # Defensive clear cache para no reutilizar configuración stale
                 from app.core.config import clear_settings_cache
 
                 clear_settings_cache()
@@ -113,10 +68,8 @@ class AnalyzeMediaPrepUseCase:
         safety_cfg: SafetyConfig = settings.safety
         profile: QualityProfile = processing_cfg.profile
 
-        # --- 0.1) Logging ---------------------------------------------------
         log = logger or get_logger("ia-doblaje.t03.prep")
 
-        # --- 0.2) Job ID + PathManager ------------------------------------
         jid = str(job_id) if job_id and isinstance(job_id, str) else generate_job_id()
         pm: PathManager = PathManager.from_settings(settings)
         bind_context(
@@ -126,9 +79,6 @@ class AnalyzeMediaPrepUseCase:
             logger=log,
         )
 
-        # ----------------------------------------------------------------
-        # Step 0.3: Binary resolution (ffmpeg / ffprobe) antes de arrancar
-        # ----------------------------------------------------------------
         ffmpeg_ok, ffmpeg_path_or_err, ffmpeg_ver = self.binary_resolver.resolve(
             ffmpeg_cfg.ffmpeg_bin,
             timeout_s=5,
@@ -144,48 +94,28 @@ class AnalyzeMediaPrepUseCase:
         if not ffprobe_ok:
             errors_collected.append(f"ffprobe_missing::{ffprobe_path_or_err}")
 
-        # Strict: si falta binario, fallamos ya.
         if strict and errors_collected:
             missing_msg = "; ".join(errors_collected)
             raise ConfigurationError(
                 "T03 requiere binarios FFmpeg/FFprobe disponibles. "
                 f"Errores: {missing_msg}"
             )
-        # No strict: continuamos, pero Steps 01-03 probablemente fallen;
-        # devolvemos un MediaPrepResult temprano con errores.
         if not ffmpeg_ok or not ffprobe_ok:
-            # Build dummy ValidatedMedia no podemos, porque require un Path.
-            # Devolvemos early sin procesar.
             log.warning(
                 "saltando_steps_01_03_binarios_ausentes",
                 errors=errors_collected,
                 job_id=jid,
             )
-            # Devolver stub ValidatedMedia no possible sin path/file.
-            # Lanzamos error si strict ya fue; aquí lo manejamos.
             if strict:
                 raise ConfigurationError(
                     "Binarios FFmpeg/FFprobe ausentes y strict=True."
                 )
-            # Preconditions: si no hay binarios, usamos el path resuelto input para
-            # poder devolver media_asset con algo mínimo? Mejor devolver early con
-            # MediaPrepResult y validated=None, PERO MediaPrepResult requiere
-            # validated! Entonces construimos un ValidatedMedia mínimo? No, pydantic
-            # frozen lo impide. Mejor creamos un mínimo usando PathManager sobre
-            # input_path, validar mínimo SHA y luego errores.
-            #
-            # Implementación simple aquí: si strict=False y faltan binarios,
-            # subimos ValidationFailedError si strict ya hubiera. Entonces este
-            # bloque if-not-ffmpeg es dead code. Eliminamos, pero mantenemos
-            # logging.
             log.info(
                 "continuando_sin_binarios_strict_false",
                 job_id=jid,
                 ffmpeg=ffmpeg_ok,
                 ffprobe=ffprobe_ok,
             )
-        # Resolved paths finales. Los pasos posteriores deben usar estas rutas:
-        # el nombre suelto "ffprobe" falla si el proceso no heredó el PATH nuevo.
         ffmpeg_bin: str = ffmpeg_path_or_err if ffmpeg_ok else ""
         ffprobe_bin: str = ffprobe_path_or_err if ffprobe_ok else ""
         ffmpeg_cfg = ffmpeg_cfg.model_copy(
@@ -195,11 +125,9 @@ class AnalyzeMediaPrepUseCase:
             }
         )
 
-        # Step times dict
         t0 = time.perf_counter()
         times: dict[str, float] = {}
 
-        # Crea job_temp_dir
         job_temp_root: Path
         _, job_temp_root = pm.create_job_temp_dir(jid)
 
@@ -207,19 +135,13 @@ class AnalyzeMediaPrepUseCase:
         extracted: ExtractedAudio | None = None
         preprocessed: PreprocessedAudio | None = None
         try:
-            # ----------------------------------------------------------------
-            # Step 01: Media Validation (FFprobe)
-            # ----------------------------------------------------------------
             t1_start = time.perf_counter()
             _emit("T01_MEDIA_VALIDATION")
 
-            # PathManager: anti path traversal
             safe_resolved: Path = pm.resolve_input_path(input_path)
 
-            # Whitelist formats
             allowed = set(getattr(safety_cfg, "allowed_extensions_set", set()))
             if not allowed:
-                # fallback al de constants, por si SafetyConfig no tiene set definido
                 allowed = {f.value.lower() for f in SUPPORTED_MEDIA_FORMATS}
 
             try:
@@ -237,15 +159,10 @@ class AnalyzeMediaPrepUseCase:
                 AudioExtractionError,
                 ConfigurationError,
             ):
-                # strict=True (default) ya bublea hacia arriba; non strict:
-                # logueamos y re-raise igual porque no tenemos fallback real.
                 raise
 
             times["validate"] = round(time.perf_counter() - t1_start, 6)
 
-            # ----------------------------------------------------------------
-            # Step 02: Audio Extraction (FFmpeg)
-            # ----------------------------------------------------------------
             t2_start = time.perf_counter()
             _emit("T02_AUDIO_EXTRACTION")
             extracted = self.extractor.extract(
@@ -257,9 +174,6 @@ class AnalyzeMediaPrepUseCase:
             )
             times["extract"] = round(time.perf_counter() - t2_start, 6)
 
-            # ----------------------------------------------------------------
-            # Step 03: Audio Preprocessing (FFmpeg)
-            # ----------------------------------------------------------------
             t3_start = time.perf_counter()
             _emit("T03_AUDIO_PREPROCESSING")
             preprocessed = self.preprocessor.preprocess(
@@ -272,9 +186,6 @@ class AnalyzeMediaPrepUseCase:
             times["preprocess"] = round(time.perf_counter() - t3_start, 6)
 
         finally:
-            # La limpieza del directorio temporal del job es responsabilidad
-            # EXCLUSIVA de T14 (RunTempCleanupUseCase). T01-T03 NO debe borrar
-            # los WAV preprocesados, porque T04-T13 aún los necesitan.
             log.debug(
                 "media_prep_finished_keep_temp_for_downstream",
                 job_id=jid,

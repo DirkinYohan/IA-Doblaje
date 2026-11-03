@@ -1,10 +1,3 @@
-"""Implementaciones concretas Ports Domain via FFmpeg/FFprobe — Capa INFRASTRUCTURE.
-
-Todas las invocaciones externas son a procesos:
-    subprocess.run([list[str], shell=False, capture_output=True, timeout=...]).
-
-Nunca descarga binarios, nunca shell=True, nunca strings concatenados.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -45,13 +38,7 @@ from app.domain.value_objects.audio import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _sha256_file(path: Path, chunk_bytes: int = 4 * 1024 * 1024) -> str:
-    """SHA-256 streaming 64 chars lower hex. Python stdlib. Chunks 4MB."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         while True:
@@ -63,7 +50,6 @@ def _sha256_file(path: Path, chunk_bytes: int = 4 * 1024 * 1024) -> str:
 
 
 def _safe_stderr(stderr_b: bytes, limit: int = 200) -> str:
-    """Trunca stderr ≤ N chars y limpia newlines/CR."""
     if not stderr_b:
         return ""
     try:
@@ -86,14 +72,7 @@ def _resolve_format_from_ext(ext_no_dot_lower: str) -> MediaFormat:
     )
 
 
-# ---------------------------------------------------------------------------
-# 1) BinaryResolverPort
-# ---------------------------------------------------------------------------
-
-
 class SubprocessFFmpegBinaryResolver:
-    """Detecta FFmpeg/FFprobe vía subprocess -version. NO descarga binarios."""
-
     def resolve(
         self,
         bin_name: str,
@@ -142,7 +121,6 @@ class SubprocessFFmpegBinaryResolver:
 
 
 def _locate_binary(bin_name: str) -> str | None:
-    """Busca el binario en el PATH del proceso y, en Windows, en el PATH ya guardado."""
     found = shutil.which(bin_name)
     if found:
         return found
@@ -179,17 +157,11 @@ def _locate_on_windows(bin_name: str) -> str | None:
     return shutil.which(exe, path=os.pathsep.join(folders))
 
 
-# ---------------------------------------------------------------------------
-# Helpers ffprobe
-# ---------------------------------------------------------------------------
-
-
 def _run_ffprobe_json(
     probe_bin_path: str,
     input_path: Path,
     timeout_s: int,
 ) -> dict[str, Any]:
-    """Llama ffprobe -show_format -show_streams JSON. Raises ValidationFailedError."""
     cmd: list[str] = [
         probe_bin_path,
         "-v",
@@ -254,14 +226,7 @@ def _extract_audio_stream_and_duration(
     return (audio_count, duration)
 
 
-# ---------------------------------------------------------------------------
-# 2) MediaValidatorPort
-# ---------------------------------------------------------------------------
-
-
 class FFprobeMediaValidator(MediaValidatorPort):
-    """Step 01. Fail-Fast validación + ffprobe."""
-
     def validate(
         self,
         input_path: Path,
@@ -281,7 +246,6 @@ class FFprobeMediaValidator(MediaValidatorPort):
 
         p = Path(input_path)
 
-        # 1) exists + is_file
         if not p.exists():
             raise ValidationFailedError(
                 f"Archivo multimedia no existe: {p!r}",
@@ -293,7 +257,6 @@ class FFprobeMediaValidator(MediaValidatorPort):
                 details={"error_code": "MediaNotRegularFile"},
             )
 
-        # 2) stat
         try:
             st = p.stat()
         except OSError as exc:
@@ -302,14 +265,12 @@ class FFprobeMediaValidator(MediaValidatorPort):
             )
         size_bytes_int = int(st.st_size)
 
-        # 3) empty
         if size_bytes_int == 0:
             raise ValidationFailedError(
                 "EmptyMediaFile: 0 bytes. No se puede procesar.",
                 details={"error_code": "EmptyMediaFile"},
             )
 
-        # 4) max size
         max_bytes = int(float(getattr(safety_cfg, "max_media_size_gb", 10.0)) * (1024**3))
         if max_bytes <= 0:
             max_bytes = 10 * (1024**3)
@@ -320,7 +281,6 @@ class FFprobeMediaValidator(MediaValidatorPort):
                 f"MediaTooLarge: {gb_file:.3f}GB > max_media_size_gb={gb_max:.3f}GB"
             )
 
-        # 5) Extension whitelist
         ext_raw = p.suffix.lower().lstrip(".")
         if not ext_raw or ext_raw not in allowed_formats:
             raise UnsupportedMediaError(
@@ -328,10 +288,8 @@ class FFprobeMediaValidator(MediaValidatorPort):
                 f"Permitidas: {sorted(list(allowed_formats))}"
             )
 
-        # 6) SHA256
         sha = _sha256_file(p)
 
-        # 7) ffprobe
         probe_data = _run_ffprobe_json(probe_bin_path, p, probe_timeout_s)
         audio_count, dur = _extract_audio_stream_and_duration(probe_data)
         if audio_count <= 0:
@@ -356,11 +314,6 @@ class FFprobeMediaValidator(MediaValidatorPort):
         )
 
 
-# ---------------------------------------------------------------------------
-# 3) AudioExtractorPort
-# ---------------------------------------------------------------------------
-
-
 _PREPROCESS_SANITY_MAX_PCT = 5.0
 
 
@@ -375,7 +328,6 @@ def _parse_wav_probe(
     wav_path: Path,
     timeout_s: int,
 ) -> tuple[int, int, int, float, int, int, str, int]:
-    """Returns (sample_rate, channels, bit_depth, duration_sec, size_bytes, dur_ms, sha, streams_n)."""
     data = _run_ffprobe_json(probe_bin_path, wav_path, timeout_s)
     streams = list(data.get("streams") or [])
     if not streams:
@@ -405,8 +357,6 @@ def _parse_wav_probe(
 
 
 class FFmpegAudioExtractor(AudioExtractorPort):
-    """Step 02. Extrae WAV PCM 16-bit, 16kHz, mono según FFmpegConfig."""
-
     def extract(
         self,
         validated: ValidatedMedia,
@@ -428,7 +378,7 @@ class FFmpegAudioExtractor(AudioExtractorPort):
 
         target_sr = int(getattr(ffmpeg_cfg, "target_sample_rate_hz", 16000))
         target_ch = int(getattr(ffmpeg_cfg, "target_channels", 1))
-        _ = getattr(ffmpeg_cfg, "target_bit_depth", 16)  # siempre pcm_s16le
+        _ = getattr(ffmpeg_cfg, "target_bit_depth", 16)
         timeout_s = int(getattr(ffmpeg_cfg, "ffmpeg_timeout_sec", 7200))
 
         cmd: list[str] = [
@@ -516,13 +466,6 @@ class FFmpegAudioExtractor(AudioExtractorPort):
         )
 
 
-# ---------------------------------------------------------------------------
-# 4) AudioPreprocessorPort
-# ---------------------------------------------------------------------------
-
-
-# Metadata EXACTA de operaciones realmente realizadas (2-pass peak norm -1.5 dBTP).
-# Orden DETERMINISTICO inalterable (reproducibilidad).
 APPLIED_FILTERS_T03: tuple[str, ...] = (
     "highpass_80hz_order4",
     "dc_removal_dcshift_0",
@@ -532,16 +475,14 @@ APPLIED_FILTERS_T03: tuple[str, ...] = (
     "post_verify_tp_le_-1.5dBTP_astats",
 )
 
-# Parámetros Peak Norm (True Peak -1.5 dBTP + EBU R128 -16 LUFS integrado, std broadcast).
 _PN_TARGET_TP_DP = -1.5
 _PN_TARGET_I_LUFS = -16.0
 _PN_TARGET_LRA = 11.0
-_PN_TP_TOLERANCE_UP_DB = 0.2  # TP post no debe superar -1.5+0.2 = -1.3 dBTP.
+_PN_TP_TOLERANCE_UP_DB = 0.2
 _PN_DEFAULT_MEASURED_D = {"input_i": "-70.0", "input_tp": "-70.0", "input_lra": "0.0", "target_offset": "0.0"}
 
 
 def _parse_loudnorm_json(stderr_b: bytes) -> dict[str, str]:
-    """Extrae bloque JSON {input_i,input_tp,input_lra,target_offset} del stderr de loudnorm print_format=json."""
     s = _safe_stderr(stderr_b, limit=20000)
     try:
         start = s.rfind("{")
@@ -591,10 +532,6 @@ def _run_and_check(cmd: list[str], kind: str, timeout_s: int) -> None:
 
 
 def _measure_tp_lufs_post(wav: Path, ffmpeg_bin: str, timeout_s: int) -> tuple[float | None, float | None]:
-    """Medición post de TP e I (LUFS integrado) via loudnorm 2-pass print_format=json.
-
-    Returns: (output_tp_dB, output_i_LUFS) o (None, None) si no se puede medir.
-    """
     cmd: list[str] = [
         ffmpeg_bin,
         "-hide_banner",
@@ -636,17 +573,6 @@ def _measure_tp_lufs_post(wav: Path, ffmpeg_bin: str, timeout_s: int) -> tuple[f
 
 
 class FFmpegAudioPreprocessor(AudioPreprocessorPort):
-    """Step 03: Peak Normalization -1.5 dBTP DETERMINISTICO 2 PASOS.
-
-    Garantías:
-      * 2-pass loudnorm EBU R128: (A) ANÁLISIS con print_format=json →
-        measured_I, measured_TP, measured_LRA, target_offset;
-        (B) APLICACIÓN linear=true usando esos valores.
-      * Post-verificación TP <= -1.5 dBTP (tolerancia +0.2 dB),
-        sino raise AudioExtractionError.
-      * Salida s16le 16kHz mono FORZADA por `aformat` al final + probe ffprobe.
-    """
-
     def preprocess(
         self,
         extracted: ExtractedAudio,
@@ -672,7 +598,6 @@ class FFmpegAudioPreprocessor(AudioPreprocessorPort):
         timeout_s = int(getattr(ffmpeg_cfg, "ffmpeg_timeout_sec", 7200))
         null_dst = "nul" if __import__("sys").platform.startswith("win") else "/dev/null"
 
-        # swr viene en FFmpeg LGPL. soxr no está en la build essentials.
         af_pre: str = (
             "highpass=f=80:poles=2,"
             "dcshift=0,"
@@ -706,7 +631,6 @@ class FFmpegAudioPreprocessor(AudioPreprocessorPort):
                 details={"error_code": "PreprocSubAEmpty"},
             )
 
-        # ----- SUBPASO B: ANÁLISIS 2-pass (loudnorm print_format=json). NO produce audio.
         cmd_analysis: list[str] = [
             ffmpeg_bin_path,
             "-hide_banner",
@@ -768,7 +692,6 @@ class FFmpegAudioPreprocessor(AudioPreprocessorPort):
         m_lra = _as_float("input_lra", 7.0)
         m_off = _as_float("target_offset", 0.0)
 
-        # ----- SUBPASO C: APLICACIÓN 2-pass loudnorm linear=true + aformat s16/16k/mono.
         af_apply: str = (
             f"loudnorm=I={_PN_TARGET_I_LUFS}:TP={_PN_TARGET_TP_DP}:LRA={_PN_TARGET_LRA}"
             f":measured_I={m_i:.4f}:measured_TP={m_tp:.4f}:measured_LRA={m_lra:.4f}"
@@ -803,7 +726,6 @@ class FFmpegAudioPreprocessor(AudioPreprocessorPort):
                 details={"error_code": "PreprocSubCEmpty"},
             )
 
-        # ----- SUBPASO D: POST-VERIFICACIÓN TP ≤ -1.5 dBTP (tolerancia +0.2)
         post_tp, _post_i = _measure_tp_lufs_post(wav_final, ffmpeg_bin_path, timeout_s)
         if post_tp is not None:
             max_allowed = _PN_TARGET_TP_DP + _PN_TP_TOLERANCE_UP_DB
@@ -818,7 +740,6 @@ class FFmpegAudioPreprocessor(AudioPreprocessorPort):
                     },
                 )
 
-        # Probe final ffprobe (16kHz mono 16-bit obligatorio).
         sr, ch, bd, dur_sec, size_bytes, dur_ms, sha, _n = _parse_wav_probe(
             ffmpeg_cfg.ffprobe_bin,
             wav_final,

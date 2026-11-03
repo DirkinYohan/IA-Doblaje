@@ -1,4 +1,3 @@
-"""Vídeo con subtítulos incrustados: FFmpeg real sobre un vídeo generado."""
 from __future__ import annotations
 
 import json
@@ -34,7 +33,6 @@ class Cue:
 
 @pytest.fixture(scope="module")
 def clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """3 s de vídeo de prueba (fondo gris uniforme) con audio."""
     target = tmp_path_factory.mktemp("render") / "clip.mp4"
     subprocess.run(
         [
@@ -58,7 +56,6 @@ def _frame(video: Path, at: float) -> np.ndarray:
 
 
 def changed(a: np.ndarray, b: np.ndarray) -> float:
-    """Fracción de píxeles claramente distintos (el texto ocupa poca área)."""
     return float((np.abs(a - b) > 30).mean())
 
 
@@ -87,7 +84,6 @@ def test_los_subtitulos_quedan_dibujados_en_la_imagen(clip: Path, tmp_path: Path
     top = changed(with_text[: int(H * 0.5)], original[: int(H * 0.5)])
     assert bottom > 0.03, f"el subtítulo debe verse abajo ({bottom:.1%} de píxeles cambiados)"
     assert top < 0.001, f"la parte de arriba no cambia ({top:.1%} de píxeles cambiados)"
-    # Pasado su intervalo, el subtítulo desaparece.
     after = changed(_frame(out, 2.6)[int(H * 0.7):], _frame(clip, 2.6)[int(H * 0.7):])
     assert after < 0.001
 
@@ -104,7 +100,6 @@ def _frames(video: Path) -> int:
 def test_por_tramos_en_paralelo_sin_saltos_en_las_uniones(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Tramos de 2 s: el subtítulo que cruza una unión se ve a ambos lados."""
     source = tmp_path / "long.mp4"
     subprocess.run(
         [
@@ -118,7 +113,6 @@ def test_por_tramos_en_paralelo_sin_saltos_en_las_uniones(
     monkeypatch.setattr(render, "_MIN_PART_MS", 2000)
     _w, _h, duration = render.probe(source)
     assert len(render._parts(duration)) == 3
-    # Cruza la unión de los 2 s; el segundo, la de los 4 s.
     cues = [Cue(1, 1500, 2600, "PRIMERO"), Cue(2, 3700, 4400, "SEGUNDO")]
     ass = to_ass_burn(cues, language="es", width=W, height=H)
     progress: list[int] = []
@@ -161,11 +155,8 @@ def test_el_original_remoto_se_descarga_una_vez(clip: Path, tmp_path: Path) -> N
     finally:
         server.shutdown()
         server.server_close()
-    # Una ruta local se usa tal cual.
     assert render.local_source(clip, cache) == clip
 
-
-# --- API -------------------------------------------------------------------
 
 @pytest.fixture
 def api(tmp_path: Path, monkeypatch, clip: Path):
@@ -223,11 +214,8 @@ def test_flujo_completo_por_la_api(api: TestClient, clip: Path) -> None:
     assert "Mi video (es).mp4" in file.headers["content-disposition"]
     assert len(file.content) > 1000
 
-    # Sin cambios en la pista, no se vuelve a renderizar.
     assert api.post(f"/api/videos/{project_id}/render", json={"lang": "es"}).json()["state"] == "done"
 
-    # Editar la pista deja el vídeo desactualizado, pero se puede descargar
-    # (la pista puede cambiar mientras se renderiza) y volver a preparar.
     db.run(api.app.state.conn, "UPDATE subtitles SET updated_at='v2' WHERE project_id=?", (project_id,))
     assert api.get(f"/api/videos/{project_id}/render", params={"lang": "es"}).json()["state"] == "stale"
     assert api.get(f"/api/videos/{project_id}/render/file", params={"lang": "es"}).status_code == 200

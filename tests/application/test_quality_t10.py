@@ -1,8 +1,3 @@
-"""Tests unitarios T10 Application RunQualityAnalysisUseCase.
-
-No requiere IA. Entidades sintéticas T04/T06/T08/T09. Cubre QR01..QR11,
-score, niveles, strict mode, silent fallback y AST.
-"""
 from __future__ import annotations
 
 import ast
@@ -42,7 +37,6 @@ def _seg(idx=0, start=0, end=1000, text="hola", speaker="SPEAKER_00", align_conf
 
 
 def _seg_raw(idx=0, start=0, end=1000, text="hola", speaker="SPEAKER_00", align_conf=1.0, ts_conf=1.0) -> DialogueSegment:
-    """Construye DialogueSegment sin validación (para reglas defensivas QR01/QR03)."""
     return DialogueSegment.model_construct(
         segment_index=idx, start_ms=start, end_ms=end, duration_ms=end - start,
         text=text, speaker_label=speaker, alignment_confidence=align_conf, ts_confidence=ts_conf,
@@ -69,7 +63,6 @@ def _alignment(segments=None, num_segments=0, num_aligned=0, num_unassigned=0, t
 
 
 def _alignment_raw(segments=None, num_segments=0, num_aligned=0, num_unassigned=0, total_ms=10000):
-    """Construye AlignmentResult sin validación (para reglas defensivas QR01/QR03)."""
     segs = tuple(segments or [])
     return AlignmentResult.model_construct(
         strategy="weighted_overlap_majority_vote",
@@ -148,11 +141,6 @@ def _run(alignment, vad, asr, diar, strict=False, thresholds=None):
     return RunQualityAnalysisUseCase(strict=strict).run(alignment, vad, asr, diar, thresholds=thresholds)
 
 
-# =============================================================================
-# Reglas individuales
-# =============================================================================
-
-
 class TestRules:
     def test_qr01_start_ge_end_fails(self):
         a = _alignment_raw([_seg_raw(start=1000, end=1000)], num_segments=1, num_aligned=1)
@@ -170,7 +158,6 @@ class TestRules:
             _run(a, _vad(), _asr(), _diarization(), strict=True)
 
     def test_qr04_overlap_defensive_zero(self):
-        # con entradas T09 no solapadas, QR04 debe dar 0 occurrences
         a = _alignment([_seg(0, 0, 1000), _seg(1, 1000, 2000)], num_segments=2, num_aligned=2)
         r = _run(a, _vad(), _asr(), _diarization(), strict=False)
         qr04 = [x for x in r.rule_results if x.rule_code == "QR04"][0]
@@ -219,17 +206,11 @@ class TestRules:
         assert qr10.occurrences == 1
 
     def test_qr11_asr_in_silence(self):
-        # segmento alineado fuera de voice_intervals → voz detectada en silencio
         a = _alignment([_seg(0, 5000, 6000)], num_segments=1, num_aligned=1)
         vad = _vad(intervals=[(0, 1000)])
         r = _run(a, vad, _asr(), _diarization(), strict=False)
         qr11 = [x for x in r.rule_results if x.rule_code == "QR11"][0]
         assert qr11.occurrences == 1
-
-
-# =============================================================================
-# Score / niveles / strict
-# =============================================================================
 
 
 class TestScoreLevel:
@@ -240,15 +221,12 @@ class TestScoreLevel:
         assert r.overall_quality_score == 1.0
 
     def test_score_warning(self):
-        # 10 unassigned → QR05: 10*0.03 = 0.30 → score 0.70 (warning)
         a2 = _alignment([], num_segments=10, num_aligned=0, num_unassigned=10)
         r = _run(a2, _vad(), _asr(), _diarization(num_speakers=1), strict=False)
-        # QR05: 10*0.03 = 0.30; QR06: speakers=1 aligned=0 → -0.02 → total 0.32 → score 0.68 (warning)
         assert r.quality_level == QualityLevel.WARNING
         assert r.overall_quality_score < 0.80
 
     def test_score_failed(self):
-        # QR01 ERROR con violación → score 0.0 → failed
         a = _alignment_raw([_seg_raw(start=1000, end=1000)], num_segments=1, num_aligned=1)
         with pytest.raises(QualityFailedError):
             _run(a, _vad(), _asr(), _diarization(), strict=True)
@@ -362,14 +340,8 @@ class TestASTAudit:
             assert not (imports & forbidden), f"{p} importa prohibido: {imports & forbidden}"
 
 
-# =============================================================================
-# Cobertura adicional: límites, transiciones, acumulaciones
-# =============================================================================
-
-
 class TestScoreBoundaries:
     def test_score_exactly_080_passed(self):
-        # score = 0.80 exacto → passed
         r = QualityResult(
             strategy=QUALITY_STRATEGY_RULES,
             source_preprocessed_sha256=_SHA,
@@ -393,7 +365,6 @@ class TestScoreBoundaries:
         assert r.quality_level == QualityLevel.PASSED
 
     def test_score_079_warning(self):
-        # score 0.79 → warning
         r = QualityResult(
             strategy=QUALITY_STRATEGY_RULES,
             source_preprocessed_sha256=_SHA,
@@ -417,7 +388,6 @@ class TestScoreBoundaries:
         assert r.quality_level == QualityLevel.WARNING
 
     def test_score_030_warning(self):
-        # score 0.30 exacto → warning (límite inferior)
         r = QualityResult(
             strategy=QUALITY_STRATEGY_RULES,
             source_preprocessed_sha256=_SHA,
@@ -441,7 +411,6 @@ class TestScoreBoundaries:
         assert r.quality_level == QualityLevel.WARNING
 
     def test_score_029_failed(self):
-        # score 0.29 → failed
         r = QualityResult(
             strategy=QUALITY_STRATEGY_RULES,
             source_preprocessed_sha256=_SHA,
@@ -467,7 +436,6 @@ class TestScoreBoundaries:
 
 class TestPenaltyAccumulation:
     def test_multiple_silences_penalty_accumulates(self):
-        # 2 silencios >15s → QR10: 2 * 0.015 = 0.03
         a = _alignment([_seg(0, 0, 1000)], num_segments=1, num_aligned=1)
         vad = _vad(intervals=[(0, 1000), (17000, 18000)], silences=[(1000, 17000), (18000, 34000)])
         r = _run(a, vad, _asr(), _diarization(), strict=False)
@@ -486,7 +454,6 @@ class TestPenaltyAccumulation:
         assert qr09.occurrences == 2
 
     def test_score_clamp_to_zero(self):
-        # un ERROR con violación → score 0.0 (clamp inferior)
         a = _alignment_raw([_seg_raw(text="")], num_segments=1, num_aligned=1)
         r = _run(a, _vad(), _asr(), _diarization(), strict=False)
         assert r.overall_quality_score == 0.0
@@ -505,7 +472,6 @@ class TestPenaltyAccumulation:
         assert r.num_segments_unassigned == 1
 
     def test_partial_asr_in_silence(self):
-        # segmento parcialmente en voz, parcialmente en silencio → sin violación QR11
         a = _alignment([_seg(0, 0, 500)], num_segments=1, num_aligned=1)
         vad = _vad(intervals=[(0, 1000)])
         r = _run(a, vad, _asr(), _diarization(), strict=False)
@@ -520,4 +486,3 @@ class TestPenaltyAccumulation:
         r1 = _run(a, _vad(), _asr(), _diarization(), strict=False)
         r2 = _run(a, _vad(), _asr(), _diarization(), strict=False)
         assert r1.model_dump() == r2.model_dump()
-

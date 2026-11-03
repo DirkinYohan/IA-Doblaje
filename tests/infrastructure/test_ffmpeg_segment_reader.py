@@ -1,4 +1,3 @@
-"""Lector de audio por segmentos sobre FFmpeg REAL (sin dobles)."""
 from __future__ import annotations
 
 import hashlib
@@ -19,7 +18,6 @@ pytestmark = pytest.mark.skipif(not (FFMPEG and FFPROBE), reason="FFmpeg no inst
 
 @pytest.fixture(scope="module")
 def media(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """MP4 de 12 s: 0-4 s silencio, 4-12 s tono de 440 Hz (estéreo, 44,1 kHz)."""
     target = tmp_path_factory.mktemp("seg") / "tone.mp4"
     subprocess.run(
         [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",

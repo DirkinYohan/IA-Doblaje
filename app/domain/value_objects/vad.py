@@ -1,7 +1,3 @@
-"""Value Objects VAD Step 04 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (no torch/silero/soundfile).
-"""
 from __future__ import annotations
 
 from typing import Annotated
@@ -14,11 +10,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.functional_validators import AfterValidator
-
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_ms_ge_zero(v: int) -> int:
@@ -50,14 +41,7 @@ def _validate_confidence_0_1(v: float) -> float:
 SpeechConfidence = Annotated[float, AfterValidator(_validate_confidence_0_1)]
 
 
-# ---------------------------------------------------------------------------
-# 2) VoiceInterval + SilenceSegment
-# ---------------------------------------------------------------------------
-
-
 class VoiceInterval(BaseModel):
-    """Segmento de voz detectado. Validación estricta. Frozen."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     start_ms: MsTimestamp = Field(..., description="Inclusivo.")
@@ -76,7 +60,6 @@ class VoiceInterval(BaseModel):
             )
         expected_dur = int(self.end_ms) - int(self.start_ms)
         if self.duration_ms <= 0 or self.duration_ms != expected_dur:
-            # Recompute forzando la regla single source of truth.
             object.__setattr__(self, "duration_ms", expected_dur)
         if self.sample_count < 0:
             raise ValueError(
@@ -90,8 +73,6 @@ class VoiceInterval(BaseModel):
 
 
 class SilenceSegment(BaseModel):
-    """Segmento de silencio (complementario de VoiceIntervals). Frozen."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     start_ms: MsTimestamp
@@ -112,20 +93,7 @@ class SilenceSegment(BaseModel):
         return int(self.end_ms) - int(self.start_ms)
 
 
-# ---------------------------------------------------------------------------
-# 3) VadThresholds (configuración centralizada VAD)
-# ---------------------------------------------------------------------------
-
-
 class VadThresholds(BaseModel):
-    """Configuración VAD centralizada. Defaults estrictos T04.
-
-    speech_threshold           = 0.5
-    min_speech_duration_ms     = 200
-    min_silence_between_ms     = 300
-    merge_proximal_ms          = 200
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     speech_threshold: SpeechConfidence = Field(

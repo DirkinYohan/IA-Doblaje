@@ -1,11 +1,3 @@
-"""Entidad MetricsResult Step 12 — Metrics Aggregation. Capa DOMAIN.
-
-Frozen + extra=forbid. Chain of custody 2-SHA:
-  source_preprocessed_sha256 (T03)
-  validation_reference_sha256 (T11)
-
-Sin dependencias infraestructura (no psutil/torch/numpy).
-"""
 from __future__ import annotations
 
 from typing import Literal
@@ -33,8 +25,6 @@ MODEL_LABEL_METRICS_V1_LITERAL: Literal["t12:metrics-aggregation:v1"] = (
 
 
 class MetricsResult(BaseModel):
-    """Resultado Step 12 Metrics Aggregation. Inmutable. Chain of Custody 2-SHA."""
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -42,19 +32,15 @@ class MetricsResult(BaseModel):
         protected_namespaces=(),
     )
 
-    # ---- Step identifiers ------------------------------------------------
     step: PipelineStep = PipelineStep.METRICS_AGGREGATION
     model_label: Literal["t12:metrics-aggregation:v1"] = MODEL_LABEL_METRICS_V1_LITERAL
 
-    # ---- Chain of Custody 2-SHA ------------------------------------------
     source_preprocessed_sha256: Sha256Hash
     validation_reference_sha256: Sha256Hash
 
-    # ---- Estado ----------------------------------------------------------
     job_id: str | None = Field(default=None, min_length=8, max_length=128)
     metrics_enabled: bool = Field(True, description="False si la agregación fue deshabilitada.")
 
-    # ---- TIEMPOS ---------------------------------------------------------
     processing_wall_time_sec: MetricNonNegativeFloat = Field(0.0)
     audio_duration_sec: MetricNonNegativeFloat = Field(0.0)
     real_time_factor_RTF: MetricNonNegativeFloat | None = Field(
@@ -62,16 +48,13 @@ class MetricsResult(BaseModel):
     )
     step_timings_sec: dict[str, float] = Field(default_factory=dict)
 
-    # ---- MEMORIA ---------------------------------------------------------
     peak_cpu_rss_mb: MetricNonNegativeFloat = Field(0.0)
     peak_gpu_vram_used_mb: MetricNonNegativeFloat = Field(0.0)
     peak_gpu_vram_total_mb: MetricNonNegativeFloat = Field(0.0)
 
-    # ---- UTILIZACIÓN -----------------------------------------------------
     cpu_utilization_avg_percent: MetricPercent = Field(0.0)
     gpu_utilization_avg_percent: MetricPercent = Field(0.0)
 
-    # ---- CONTEOS ---------------------------------------------------------
     segment_count_total: MetricCount = Field(0)
     segment_count_with_text: MetricCount = Field(0)
     word_count_total: MetricCount = Field(0)
@@ -79,13 +62,11 @@ class MetricsResult(BaseModel):
     speaker_count_detected: MetricCount = Field(0)
     silence_segment_count: MetricCount = Field(0)
 
-    # ---- CALIDAD / CONFIANZA ---------------------------------------------
     average_asr_confidence: MetricConfidence = Field(0.0)
     average_diarization_confidence: MetricConfidence = Field(0.0)
     language_detection_confidence: MetricConfidence = Field(0.0)
     overall_quality_score: MetricConfidence = Field(0.0)
 
-    # ---- COMPLIANCE ------------------------------------------------------
     profile_requested: str = Field("")
     profile_applied: str = Field("")
     profile_downgrade_applied: bool = Field(False)
@@ -93,12 +74,8 @@ class MetricsResult(BaseModel):
     device_requested: str = Field("")
     device_used: str = Field("")
 
-    # ---- Auditoría -------------------------------------------------------
     analysis_metadata: dict[str, object] = Field(default_factory=dict)
 
-    # ======================================================================
-    # VALIDADORES
-    # ======================================================================
 
     @field_validator("source_preprocessed_sha256", "validation_reference_sha256")
     @classmethod
@@ -149,12 +126,10 @@ class MetricsResult(BaseModel):
 
     @model_validator(mode="after")
     def _validate_all(self) -> "MetricsResult":
-        # (A) Chain of custody
         if str(self.source_preprocessed_sha256) != str(self.validation_reference_sha256):
             raise ValueError(
                 "Chain of Custody rota T12: source != validation_reference."
             )
-        # (B) RTF coherencia (si audio>0 y RTF presente, debe coincidir aprox)
         if self.audio_duration_sec > 0 and self.real_time_factor_RTF is not None:
             expected = round(self.processing_wall_time_sec / self.audio_duration_sec, 6)
             actual = round(float(self.real_time_factor_RTF), 6)

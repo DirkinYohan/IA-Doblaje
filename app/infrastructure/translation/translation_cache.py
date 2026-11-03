@@ -1,4 +1,3 @@
-"""Caché JSON de traducciones. La clave la calcula el caso de uso."""
 from __future__ import annotations
 
 import json

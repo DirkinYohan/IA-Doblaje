@@ -1,4 +1,3 @@
-"""Tests Infrastructure FFmpeg Adapters T03 — 0 subprocess real (monkeypatch)."""
 from __future__ import annotations
 
 import json
@@ -38,11 +37,6 @@ from app.infrastructure.audio.ffmpeg_adapters import (
 from tests.fixtures.wav_synth import create_synthetic_wav_pcm16
 
 
-# ---------------------------------------------------------------------------
-# Helpers test
-# ---------------------------------------------------------------------------
-
-
 def _fake_safety_cfg(max_gb: float = 10.0, allowed: str = "mp4,mkv,mov,wav,mp3,m4a") -> SafetyConfig:
     return SafetyConfig(max_media_size_gb=max_gb, allowed_extensions=allowed)
 
@@ -67,15 +61,6 @@ def _fake_ffmpeg_cfg(
 
 @dataclass
 class FakeCompletedProcess:
-    """Mock subprocess.CompletedProcess.
-
-    Simula `subprocess.run(..., text=True)`: stdout/stderr se pueden inicializar
-    como bytes o str y la clase expone siempre ambos atributos en str si
-    `text=True` fue pasado a la llamada (kw detectado). Para simplificar:
-    aceptamos bytes en constructor y exponemos como str codificado utf8 cuando
-    el caller lo quiera via `text=True`.
-    """
-
     returncode: int = 0
     stdout: bytes | str = b""
     stderr: bytes | str = b""
@@ -83,7 +68,6 @@ class FakeCompletedProcess:
     timeout: int | None = None
 
     def __post_init__(self):
-        # Internal helpers
         pass
 
     @property
@@ -115,11 +99,6 @@ class FakeCompletedProcess:
         if isinstance(self.stderr, str):
             return self.stderr.encode("utf-8")
         return bytes(self.stderr or b"")
-
-
-# ---------------------------------------------------------------------------
-# Helpers: fake json ffprobe y make subprocess.run intercept
-# ---------------------------------------------------------------------------
 
 
 def _make_ffprobe_json(
@@ -157,11 +136,6 @@ def _make_ffprobe_json(
     return json.dumps(data).encode("utf-8")
 
 
-# ---------------------------------------------------------------------------
-# _sha256_file
-# ---------------------------------------------------------------------------
-
-
 def test_sha256_file_matches_hashlib(tmp_path) -> None:
     p = tmp_path / "x.bin"
     p.write_bytes(b"hello t03 sha256 check")
@@ -178,14 +152,9 @@ def test_sha256_deterministic(tmp_path) -> None:
 
 def test_safe_stderr_truncate_200_chars() -> None:
     long = b"a" * 1000
-    assert len(_safe_stderr(long, 200)) == 203  # "... suffix 3 chars"
+    assert len(_safe_stderr(long, 200)) == 203
     short = b"abc"
     assert _safe_stderr(short) == "abc"
-
-
-# ---------------------------------------------------------------------------
-# SubprocessFFmpegBinaryResolver
-# ---------------------------------------------------------------------------
 
 
 def test_resolver_ok_when_which_found_and_rc0(monkeypatch) -> None:
@@ -262,18 +231,12 @@ def test_resolver_timeout_handled(monkeypatch) -> None:
     assert "timed out" in msg.lower() or "timeout" in msg.lower()
 
 
-# ---------------------------------------------------------------------------
-# FFprobeMediaValidator — tests con subprocess monkeypatch
-# ---------------------------------------------------------------------------
-
-
 def test_validator_wav_simple_ok(tmp_path, monkeypatch) -> None:
     wav, *_ = create_synthetic_wav_pcm16(
         tmp_path / "clip.wav", duration_sec=0.2, sample_rate_hz=16000
     )
 
     def fake_run(cmd: list[str], **kw):
-        # Probe cmd -> return fake valid audio stream JSON
         return FakeCompletedProcess(
             returncode=0,
             stdout=_make_ffprobe_json(duration=0.2, audio_count=1, audio_sample_rate=16000, audio_channels=1, audio_bits=16),
@@ -381,7 +344,6 @@ def test_validator_no_audio_stream_raises(tmp_path, monkeypatch) -> None:
     wav, *_ = create_synthetic_wav_pcm16(tmp_path / "silent.wav", duration_sec=0.1)
 
     def probe_no_audio(cmd, **kw):
-        # 0 streams audio
         return FakeCompletedProcess(
             returncode=0,
             stdout=_make_ffprobe_json(duration=0.1, audio_count=0),
@@ -400,11 +362,6 @@ def test_validator_no_audio_stream_raises(tmp_path, monkeypatch) -> None:
             allowed_formats={"wav"},
             probe_bin_path="/fake/ffprobe",
         )
-
-
-# ---------------------------------------------------------------------------
-# FFmpegAudioExtractor
-# ---------------------------------------------------------------------------
 
 
 def _build_validated(wav_path: Path, duration: float = 0.2) -> ValidatedMedia:
@@ -429,7 +386,6 @@ def test_extractor_ok(tmp_path, monkeypatch) -> None:
         tmp_path / "in.wav", duration_sec=0.2, sample_rate_hz=16000
     )
 
-    # Simulate: FFmpeg extract escribe un WAV output válido (el mismo helper)
     out_expected = job_root / "workspace" / "in_extracted.wav"
 
     cmd_seq: list[list[str]] = []
@@ -438,7 +394,6 @@ def test_extractor_ok(tmp_path, monkeypatch) -> None:
         cmd_seq.append(list(cmd))
         first = Path(cmd[0]).name.lower() if len(cmd) > 0 else ""
         if first.startswith("ffmpeg") and "-i" in cmd:
-            # Crear el WAV esperado para simular extracción OK
             create_synthetic_wav_pcm16(
                 out_expected, duration_sec=0.2, sample_rate_hz=16000
             )
@@ -518,11 +473,6 @@ def test_extractor_timeout(tmp_path, monkeypatch) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# FFmpegAudioPreprocessor
-# ---------------------------------------------------------------------------
-
-
 def _build_extracted(wav_path: Path, duration: float) -> ExtractedAudio:
     return ExtractedAudio(
         wav_path=wav_path.resolve(),
@@ -570,7 +520,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
     extracted_wav, *_ = create_synthetic_wav_pcm16(
         job_root / "in_extracted.wav", duration_sec=0.15
     )
-    # Mismo stem que usa FFmpegAudioPreprocessor internamente: extracted.wav_path.stem
     stem = extracted_wav.stem
     wav_pre = job_root / f"{stem}_A_pre_dsp.wav"
     expected_pp = job_root / f"{stem}_B_final_preprocessed.wav"
@@ -581,7 +530,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
         _calls.append(list(cmd))
         first = Path(cmd[0]).name.lower()
         cmd_s = " ".join(cmd)
-        # (1) SubA: highpass+dc+resample → A_pre_dsp.wav. Tiene -vn -acodec pcm_s16le -af sin aformat ni linear.
         if (
             first.startswith("ffmpeg")
             and "-vn" in cmd
@@ -593,7 +541,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
         ):
             create_synthetic_wav_pcm16(wav_pre, duration_sec=0.15, sample_rate_hz=16000, channels=1)
             return FakeCompletedProcess(0, b"", b"", list(cmd))
-        # (2) Analysis: loudnorm print_format=json a null (primer pass, sin aformat, sin linear)
         if (
             first.startswith("ffmpeg")
             and "-f" in cmd
@@ -602,7 +549,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
             and "linear=true" not in cmd_s
         ):
             return FakeCompletedProcess(0, b"", _make_loudnorm_json(input_i=-22.5, input_tp=-5.9, input_lra=6.8, target_offset=0.2, output_tp=-1.52), list(cmd))
-        # (3) Apply: loudnorm linear=true + aformat sample_fmts=s16 → final
         if (
             first.startswith("ffmpeg")
             and "linear=true" in cmd_s
@@ -612,7 +558,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
                 expected_pp, duration_sec=0.15, sample_rate_hz=16000, channels=1
             )
             return FakeCompletedProcess(0, b"", b"", list(cmd))
-        # (4) Post-verify TP measurement (segundo pass loudnorm print_format=json a null)
         if (
             first.startswith("ffmpeg")
             and "-f" in cmd
@@ -621,7 +566,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
             and "measured_I" not in cmd_s
         ):
             return FakeCompletedProcess(0, b"", _make_loudnorm_json(output_tp=-1.55), list(cmd))
-        # (5) ffprobe final / intermedio
         if first.startswith("ffprobe"):
             return FakeCompletedProcess(
                 0,
@@ -649,7 +593,6 @@ def test_preprocessor_ok_applied_filters_deterministic(tmp_path, monkeypatch) ->
     assert int(res.sample_rate) == 16000
     assert int(res.channels) == 1
     assert int(res.bit_depth) == 16
-    # Applied filters debe incluir 2-pass explicitamente y no la etiqueta falsa "peak_norm_loudnorm" genérica.
     assert res.applied_filters == APPLIED_FILTERS_T03
     assert len(res.applied_filters) == 6
     assert any("2pass_analysis" in s for s in res.applied_filters)
@@ -668,7 +611,6 @@ def test_preprocessor_fail_if_wrong_sr_after(tmp_path, monkeypatch) -> None:
     def mock_run(cmd, **kw):
         first = Path(cmd[0]).name.lower()
         cmd_s = " ".join(cmd)
-        # SubA
         if (
             first.startswith("ffmpeg")
             and "-vn" in cmd
@@ -679,7 +621,6 @@ def test_preprocessor_fail_if_wrong_sr_after(tmp_path, monkeypatch) -> None:
         ):
             create_synthetic_wav_pcm16(wav_pre, duration_sec=0.1, sample_rate_hz=8000)
             return FakeCompletedProcess(0, b"", b"", cmd)
-        # Analysis loudnorm json
         if (
             first.startswith("ffmpeg")
             and "-f" in cmd
@@ -688,13 +629,11 @@ def test_preprocessor_fail_if_wrong_sr_after(tmp_path, monkeypatch) -> None:
             and "linear=true" not in cmd_s
         ):
             return FakeCompletedProcess(0, b"", _make_loudnorm_json(input_tp=-5.0, output_tp=-1.5), cmd)
-        # Apply linear + aformat
         if first.startswith("ffmpeg") and "linear=true" in cmd_s and "aformat=sample_fmts=s16" in cmd_s:
             if not bad_pp.parent.exists():
                 bad_pp.parent.mkdir(parents=True, exist_ok=True)
             create_synthetic_wav_pcm16(bad_pp, duration_sec=0.1, sample_rate_hz=8000)
             return FakeCompletedProcess(0, b"", b"", cmd)
-        # Post-verify TP measurement
         if (
             first.startswith("ffmpeg")
             and "-f" in cmd
@@ -702,7 +641,6 @@ def test_preprocessor_fail_if_wrong_sr_after(tmp_path, monkeypatch) -> None:
             and "measured_I" not in cmd_s
         ):
             return FakeCompletedProcess(0, b"", _make_loudnorm_json(output_tp=-1.6), cmd)
-        # ffprobe final con sample_rate=8000 (debe fallar)
         if first.startswith("ffprobe"):
             return FakeCompletedProcess(
                 0,

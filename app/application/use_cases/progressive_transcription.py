@@ -1,17 +1,3 @@
-"""Procesamiento progresivo por ventanas sobre el audio ya extraído.
-
-Reutiliza los adapters existentes (VAD, ASR, traducción) sin duplicar la
-arquitectura: este módulo sólo decide **en qué orden** se consume el audio y
-**cuándo** se publica cada subtítulo.
-
-Contrato:
-* El audio se lee por ventanas de ``window_ms`` con solape de contexto.
-* En cada ventana se ejecuta VAD → ASR y se construyen cues.
-* Los cues se publican INMEDIATAMENTE vía ``on_cues`` (nunca al final).
-* ``on_progress`` informa del avance en milisegundos de audio cubiertos.
-
-El audio original del vídeo no se toca: se trabaja sobre el WAV preprocesado.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,19 +9,14 @@ from app.core.exceptions import ASRProcessingError, AudioExtractionError
 
 SAMPLE_RATE = 16000
 
-# Ventana de trabajo y solape (el solape evita cortar palabras a la mitad).
 DEFAULT_WINDOW_MS = 30_000
 DEFAULT_OVERLAP_MS = 1_000
-# Ventanas más cortas al final del audio no aportan nada.
 MIN_WINDOW_MS = 500
-# Separación mínima entre cues consecutivos (invariante de la línea temporal).
 MIN_GAP_MS = 1
 
 
 @dataclass
 class WindowResult:
-    """Resultado de una ventana: cues ya listos para persistir."""
-
     index: int
     start_ms: int
     end_ms: int
@@ -44,8 +25,6 @@ class WindowResult:
 
 
 class ProgressiveAudioWindowReader:
-    """Lee tramos de un WAV 16 kHz mono sin cargarlo entero en memoria."""
-
     def __init__(self, wav_path: str | Path, *, sample_rate: int = SAMPLE_RATE) -> None:
         self.path = Path(wav_path)
         if not self.path.is_file():
@@ -65,7 +44,6 @@ class ProgressiveAudioWindowReader:
             return int(len(handle))
 
     def read(self, start_ms: int, end_ms: int) -> Any:
-        """Devuelve float32 mono [-1,1] del tramo pedido (recortado a los límites)."""
         import numpy as np
         import soundfile as sf
 
@@ -83,7 +61,6 @@ class ProgressiveAudioWindowReader:
 
 
 def _normalize_text(text: str) -> str:
-    """Clave de comparación para detectar el mismo diálogo entre ventanas."""
     return " ".join(str(text or "").split()).casefold()
 
 
@@ -93,13 +70,6 @@ def iter_windows(    total_ms: int,
     overlap_ms: int = DEFAULT_OVERLAP_MS,
     first_window_ms: int | None = None,
 ) -> list[tuple[int, int]]:
-    """Divide la duración en ventanas ``(start_ms, end_ms)`` no vacías.
-
-    ``first_window_ms`` acorta SÓLO la primera ventana. Sirve para que el primer
-    subtítulo llegue cuanto antes (el usuario no debe esperar a que se transcriba
-    medio minuto para ver algo); las siguientes mantienen ``window_ms``, que da
-    mejor calidad al ASR.
-    """
     if total_ms <= 0:
         return []
     if window_ms <= overlap_ms:
@@ -116,15 +86,12 @@ def iter_windows(    total_ms: int,
             windows.append((start, end))
         if end >= total_ms:
             break
-        # El solape se descuenta siempre del tamaño nominal, no del primero.
         start = end - overlap_ms if first else start + (window_ms - overlap_ms)
         first = False
     return windows
 
 
 class ProgressiveTranscriber:
-    """Ejecuta VAD + ASR + cues ventana a ventana."""
-
     def __init__(
         self,
         *,
@@ -144,11 +111,8 @@ class ProgressiveTranscriber:
         self.limits = limits or CueLimits()
         self.window_ms = int(window_ms)
         self.overlap_ms = int(overlap_ms)
-        # La primera ventana puede ser más corta para publicar antes el primer
-        # subtítulo; el resto conservan `window_ms`.
         self.first_window_ms = first_window_ms
 
-    # ------------------------------------------------------------------
     def process(
         self,
         reader: ProgressiveAudioWindowReader,
@@ -157,7 +121,6 @@ class ProgressiveTranscriber:
         on_progress: Callable[[int, int], None] | None = None,
         cancel_event: Any | None = None,
     ) -> list[WindowResult]:
-        """Procesa el audio completo. Publica cues en cuanto están listos."""
         results: list[WindowResult] = []
         if reader.total_frames == 0:
             return results
@@ -171,9 +134,7 @@ class ProgressiveTranscriber:
         cue_index = 0
         previous_end_ms = 0
         emitted_until_ms = 0
-        # Texto normalizado -> fin en ms, para descartar repeticiones del solape.
         recent_texts: dict[str, int] = {}
-        # Cues ya emitidos: garantizan que la línea temporal no se solape.
         emitted: list[Any] = []
 
         for index, (start_ms, end_ms) in enumerate(windows):
@@ -196,11 +157,6 @@ class ProgressiveTranscriber:
                 )
                 for seg in segments
             ]
-            # El solape de ventana hace que Whisper vuelva a oír el tramo final
-            # de la ventana anterior y suele devolver texto/timestamps algo
-            # distintos, así que no basta comparar por texto exacto.
-            # Invariante: un cue nunca puede EMPEZAR antes de donde terminó el
-            # último cue emitido (deja un hueco mínimo de separación).
             floor_ms = 0 if not emitted else emitted[-1].end_ms + MIN_GAP_MS
 
             fresh: list[tuple[int, int, str, str]] = []
@@ -231,8 +187,6 @@ class ProgressiveTranscriber:
                     key = _normalize_text(cue.text)
                     if key:
                         recent_texts[key] = max(recent_texts.get(key, 0), cue.end_ms)
-                # Poda: se recuerda al menos una ventana completa hacia atrás,
-                # que es el alcance máximo del solape entre ventanas.
                 cutoff = emitted_until_ms - (self.window_ms + 2 * self.overlap_ms)
                 recent_texts = {
                     key: end for key, end in recent_texts.items() if end >= cutoff
@@ -254,11 +208,9 @@ class ProgressiveTranscriber:
 
         return results
 
-    # ------------------------------------------------------------------
     def _transcribe_window(self, audio: Any, *, offset_ms: int, start_index: int) -> list[Any]:
         import numpy as np
 
-        # VAD opcional sobre la ventana: reduce alucinaciones en silencio.
         if self.vad is not None:
             speech = self._speech_ratio(audio)
             if speech < 0.001:
@@ -273,10 +225,9 @@ class ProgressiveTranscriber:
 
     @staticmethod
     def _speech_ratio(audio: Any) -> float:
-        """Proporción de muestras por encima del umbral de ruido (RMS por bloque)."""
         import numpy as np
 
-        block = 1600  # 100 ms
+        block = 1600
         total = len(audio) // block
         if total == 0:
             return 0.0

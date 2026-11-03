@@ -1,8 +1,3 @@
-"""Tests unitarios T13 Application RunStructuredJsonOutputUseCase.
-
-No requiere filesystem (Fake writer). Cubre los 5 documentos, orden, words=[],
-None/NaN/Inf, force_save, no mutación, determinismo y AST.
-"""
 from __future__ import annotations
 
 import ast
@@ -36,7 +31,6 @@ class _FakeWriter:
         self.order: list[str] = []
 
     def write_json(self, *, output_directory, filename, document, indent, ensure_ascii):
-        # Serializa con allow_nan=False para replicar el contrato (rechaza NaN/Inf)
         raw = json.dumps(document, indent=indent, ensure_ascii=ensure_ascii, allow_nan=False, sort_keys=False)
         self.documents[filename] = json.loads(raw)
         self.order.append(filename)
@@ -145,11 +139,6 @@ def _run(writer=None):
     return w, result
 
 
-# =============================================================================
-# Documentos
-# =============================================================================
-
-
 class TestDocuments:
     def test_five_documents_written(self):
         w, r = _run()
@@ -215,7 +204,6 @@ class TestDocuments:
 
 class TestSerialization:
     def test_allow_nan_false_rejects_nan(self):
-        # Fake writer serializa con allow_nan=False; documento con NaN debe fallar.
         writer = _FakeWriter()
         with pytest.raises(ValueError):
             writer.write_json(output_directory="/out", filename="x.json", document={"v": float("nan")}, indent=2, ensure_ascii=False)
@@ -296,11 +284,6 @@ class TestASTAudit:
                         imports.add(node.module.split(".")[0])
             forbidden = {"torch", "pyannote", "numpy", "speechbrain", "huggingface_hub", "requests", "urllib", "httpx", "subprocess"}
             assert not (imports & forbidden), f"{p} importa prohibido: {imports & forbidden}"
-
-
-# =============================================================================
-# Cobertura adicional
-# =============================================================================
 
 
 class TestAdditionalDocuments:
@@ -436,7 +419,6 @@ class TestAdditionalDocuments:
         assert w.documents["analysis.json"]["job_id"] == "job-12345678"
 
     def test_analysis_no_transcript_leak(self):
-        # analysis.json no debe incluir transcript_text (no secretos/texto completo)
         w = _FakeWriter()
         RunStructuredJsonOutputUseCase(writer=w).run(
             _asr(), _timestamps(), _diarization(), _alignment(), _quality(), _validation(), _metrics(),

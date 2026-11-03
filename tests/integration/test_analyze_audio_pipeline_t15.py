@@ -1,8 +1,3 @@
-"""Tests de integración end-to-end — AnalyzeAudioPipeline (T01→T14).
-
-Usa Fakes SOLO en tests para los adapters/use cases (no modelos reales).
-NO introduce Fakes en producción.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -27,11 +22,6 @@ from app.domain.entities.validation import ValidationResult
 
 
 _SHA = "a" * 64
-
-
-# ---------------------------------------------------------------------------
-# Fakes (solo tests)
-# ---------------------------------------------------------------------------
 
 
 class _FakeMediaPrep:
@@ -202,11 +192,6 @@ def _build_pipeline(cleanup=None):
     )
 
 
-# ---------------------------------------------------------------------------
-# Tests de integración
-# ---------------------------------------------------------------------------
-
-
 class TestPipelineIntegration:
     def test_runs_all_steps(self):
         p = _build_pipeline()
@@ -246,7 +231,6 @@ class TestPipelineIntegration:
         p.quality = _BoomQuality()
         with pytest.raises(RuntimeError):
             p.run("data/input/x.mp4")
-        # T14 en finally
         assert cleanup.calls == 1
 
     def test_force_save_propagated(self):
@@ -271,7 +255,6 @@ class TestPipelineIntegration:
         p = _build_pipeline()
         r1 = p.run("data/input/x.mp4")
         r2 = p.run("data/input/x.mp4")
-        # job_id autogenerado puede diferir; el resto es determinista
         assert r1["vad"].num_intervals == r2["vad"].num_intervals
 
 
@@ -279,7 +262,6 @@ class TestPreflight:
     def test_preflight_runs_readonly(self):
         items = run_preflight()
         assert len(items) > 0
-        # Solo lectura: no modifica nada
 
     def test_preflight_all_ok_returns_bool(self):
         items = run_preflight()

@@ -1,4 +1,3 @@
-"""API FastAPI: auth, videos, jobs, subtítulos, exportación y tiempo real."""
 from __future__ import annotations
 
 import json
@@ -26,14 +25,12 @@ from app.presentation.api.security import RateLimiter, hash_password, new_token,
 
 OFFICIAL = {"es", "en", "fr", "it", "pt"}
 COOKIE = "ia_session"
-# Vida de un ticket de WebSocket: sólo cubre el tiempo de abrir la conexión.
 WS_TICKET_TTL_S = 60
-UPLOAD_CHUNK = 1024 * 1024  # 1 MiB por lectura: nunca el archivo entero en RAM
+UPLOAD_CHUNK = 1024 * 1024
 MAX_NAME = 80
 MAX_TITLE = 180
 _SAFE_STEM = re.compile(r"[^A-Za-z0-9._-]+")
 
-# Tipo MIME por extensión: lo necesita la subida a Storage para servirlo bien.
 _MIME_BY_EXT = {
     "mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime",
     "mkv": "video/x-matroska", "webm": "video/webm", "avi": "video/x-msvideo",
@@ -64,7 +61,6 @@ def _paths() -> dict[str, Path]:
 
 
 def _safe_filename(raw: str) -> str:
-    """Nombre de archivo seguro: sin directorios, sin caracteres raros."""
     name = Path(str(raw or "")).name.strip()
     if not name:
         return ""
@@ -77,7 +73,6 @@ def _safe_filename(raw: str) -> str:
 
 
 def _probe_streams(media_path: Path) -> dict[str, Any]:
-    """Inspecciona los streams reales del archivo con ffprobe."""
     from app.infrastructure.audio.ffmpeg_adapters import (
         SubprocessFFmpegBinaryResolver,
         _run_ffprobe_json,
@@ -108,7 +103,6 @@ def _probe_streams(media_path: Path) -> dict[str, Any]:
 
 
 def _probe_duration_ms(media_path: Path) -> int:
-    """Duración real vía ffprobe. 0 si no se puede determinar."""
     try:
         from app.infrastructure.audio.ffmpeg_adapters import (
             SubprocessFFmpegBinaryResolver,
@@ -136,7 +130,6 @@ def _probe_duration_ms(media_path: Path) -> int:
 
 
 def _write_thumbnail(media_path: Path, target: Path) -> bool:
-    """Extrae un fotograma como JPEG. Devuelve False si no es posible."""
     try:
         from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
 
@@ -163,12 +156,6 @@ def _write_thumbnail(media_path: Path, target: Path) -> bool:
 
 
 def _write_storyboard(media_path: Path, target: Path, *, frames: int = 14) -> bool:
-    """Tira de miniaturas del vídeo en una sola imagen (para la línea de tiempo).
-
-    Se genera en el servidor para que el navegador no tenga que decodificar el
-    vídeo ni dibujar frames en un canvas: con el medio en Storage, ese camino
-    queda bloqueado por CORS.
-    """
     try:
         from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
 
@@ -179,7 +166,6 @@ def _write_storyboard(media_path: Path, target: Path, *, frames: int = 14) -> bo
 
         count = max(4, min(24, int(frames)))
         width, height = 176, 99
-        # Una sola imagen con `count` fotogramas en fila.
         filtro = (
             f"fps={count}/{max(1.0, _probe_duration_ms(media_path) / 1000):.6f},"
             f"scale={width}:{height}:force_original_aspect_ratio=increase,"
@@ -202,7 +188,6 @@ def _write_storyboard(media_path: Path, target: Path, *, frames: int = 14) -> bo
 
 
 def _raise_engine_error(prefix: str, exc: Exception) -> None:
-    """Convierte un fallo del motor en un HTTPException con detalle legible."""
     from app.core.exceptions import EngineBaseError
 
     detail = str(exc).strip() or exc.__class__.__name__
@@ -212,24 +197,15 @@ def _raise_engine_error(prefix: str, exc: Exception) -> None:
 
 
 def _ensure_project_metadata(conn: Any, input_root: Path, project: Any) -> Any:
-    """Completa duración y miniatura de un proyecto que aún no las tenga.
-
-    Los proyectos subidos antes de existir esta función tienen `duration_ms=0`
-    y `thumbnail_path=""`. Se rellenan una sola vez, de forma perezosa, y
-    cualquier fallo se ignora: leer la lista de proyectos nunca debe romperse.
-    """
     keys = project.keys()
     duration_ms = int(project["duration_ms"] or 0) if "duration_ms" in keys else 0
     thumbnail_path = str(project["thumbnail_path"] or "") if "thumbnail_path" in keys else ""
-    # Una miniatura en Storage ya es válida por definición: no hay archivo local
-    # que comprobar.
     thumb_ok = bool(thumbnail_path) and (
         media_store.is_remote(thumbnail_path) or Path(thumbnail_path).is_file()
     )
     if duration_ms > 0 and thumb_ok:
         return project
 
-    # Con el medio en Storage se descarga sólo para medirlo y miniaturizarlo.
     remote = media_store.is_remote(project["media_path"])
     media: Path | None = None
     try:
@@ -308,8 +284,6 @@ def create_app() -> FastAPI:
     app.state.forgot_limit = RateLimiter(5, 300)
     app.state.verify_limit = RateLimiter(5, 600)
     app.state.mailer = mailer.from_env(paths["mail"])
-    # Restos de un cierre abrupto: los medios materializados de Storage no
-    # deben sobrevivir a un reinicio.
     try:
         media_store.purge_temp(Path(str(settings.paths.data_temp_dir)), attempts=5, interval=0.2)
         media_store.purge_pending(Path(str(settings.paths.data_temp_dir)))
@@ -321,22 +295,14 @@ def create_app() -> FastAPI:
     except Exception:  # noqa: BLE001
         pass
 
-    # Precarga opcional de modelos. Desactivada por defecto: se midió que cargar
-    # M2M100 al arrancar satura la CPU del proceso y la descarga del vídeo pasó
-    # de 8,8 s a 100 s, así que el primer subtítulo llegaba mucho más tarde.
-    # `IA_PRELOAD_MODELS=1` la activa en equipos con CPU de sobra.
     if os.environ.get("IA_PRELOAD_MODELS", "0") == "1":
         worker.preload_models()
 
     app.state.worker_enabled = os.environ.get("IA_DISABLE_WORKER") != "1"
     if app.state.worker_enabled:
         worker.start(conn)
-        # Un reinicio no debe dejar jobs eternamente en PROCESSING.
         worker.reconcile_orphans(conn)
 
-    # Modo en vivo: Whisper y el traductor se cargan en cuanto el usuario ve
-    # su lista de proyectos, no cuando pulsa Reproducir. Con CTranslate2 son
-    # unos segundos de CPU, y así el primer subtítulo no espera a la carga.
     live_warm = {"started": os.environ.get("IA_LIVE_PRELOAD", "1") != "1"}
 
     def _warm_live_models() -> None:
@@ -370,13 +336,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="Sesión inválida")
         return row
 
-    # --- Tickets de WebSocket --------------------------------------------
-    # El WebSocket va directo al backend (los rewrites de Next no proxean el
-    # upgrade). La cookie de sesión es de HOST: si la página se abre con otro
-    # nombre (la URL de red que imprime Next, localhost vs 127.0.0.1…) el
-    # navegador no la envía al puerto del backend y la conexión se rechazaba
-    # con "No autenticado" en bucle. El cliente pide antes, por HTTP y en el
-    # mismo origen (con su cookie), un ticket de un solo uso y vida corta.
     ws_tickets: dict[str, tuple[str, float]] = {}
     ws_tickets_lock = threading.Lock()
 
@@ -390,7 +349,6 @@ def create_app() -> FastAPI:
         return ticket
 
     def user_from_socket(socket: WebSocket) -> sqlite3_row:
-        """Usuario del WebSocket: ticket de un solo uso o, si no hay, cookie."""
         ticket = socket.query_params.get("ticket") or ""
         if ticket:
             with ws_tickets_lock:
@@ -431,7 +389,6 @@ def create_app() -> FastAPI:
         }
 
     def send_verification(user_id: str, name: str, email: str, locale: str) -> None:
-        """Enlace para confirmar `email`: la del registro o la nueva al cambiarla."""
         token = new_token()
         expires = datetime.now(timezone.utc) + timedelta(hours=48)
         db.run(
@@ -461,8 +418,6 @@ def create_app() -> FastAPI:
         if existing is not None and existing["email_verified_at"]:
             raise HTTPException(status_code=409, detail="El email ya está registrado")
         if existing is not None:
-            # Registrado pero sin confirmar: se reenvía el enlace (sin tocar la
-            # contraseña, que no se ha demostrado de quién es).
             send_verification(existing["id"], existing["name"], email, locale)
             return {"status": "verify", "email": email}
         user_id = str(uuid.uuid4())
@@ -471,7 +426,6 @@ def create_app() -> FastAPI:
             "INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
             (user_id, name, email, hash_password(password), _now()),
         )
-        # Sin sesión: no se entra hasta confirmar el correo con el enlace.
         send_verification(user_id, name, email, locale)
         return {"status": "verify", "email": email}
 
@@ -486,7 +440,6 @@ def create_app() -> FastAPI:
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
         if row is None or not verify_password(password, row["password_hash"]):
             raise HTTPException(status_code=401, detail="Credenciales incorrectas")
-        # Después de comprobar la contraseña: así no revela qué cuentas existen.
         if not row["email_verified_at"]:
             raise HTTPException(status_code=403, detail="Confirma tu correo para iniciar sesión")
         set_session(response, row["id"], remember)
@@ -520,13 +473,10 @@ def create_app() -> FastAPI:
                 link=f"{mailer.public_url()}/reset-password?token={token}",
             )
             mailer.send_in_background(app.state.mailer, mail)
-        # La misma respuesta exista o no la cuenta: no revela qué correos
-        # están registrados.
         return {"status": "sent"}
 
     @app.post("/api/auth/verify-email")
     async def verify_email(request: Request) -> dict[str, Any]:
-        """Confirma el correo con el token del enlace (no hace falta sesión)."""
         body = await request.json()
         token = str(body.get("token") or "")
         row = db.one(
@@ -538,7 +488,6 @@ def create_app() -> FastAPI:
         if row is None or user is None:
             raise HTTPException(status_code=400, detail="Enlace inválido o vencido")
         email = row["email"]
-        # Un cambio de correo se aplica al confirmar la dirección nueva.
         if email != user["email"]:
             taken = db.one(conn, "SELECT id FROM users WHERE email=? AND id<>?", (email, user["id"]))
             if taken is not None:
@@ -548,14 +497,11 @@ def create_app() -> FastAPI:
             "UPDATE users SET email=?, email_verified_at=? WHERE id=?",
             (email, user["email_verified_at"] or _now(), user["id"]),
         )
-        # El resto de enlaces pendientes deja de valer: uno viejo no debe
-        # poder devolver la cuenta a una dirección anterior.
         db.run(conn, "UPDATE email_tokens SET used=1 WHERE user_id=?", (user["id"],))
         return {"ok": True, "email": email}
 
     @app.post("/api/auth/resend-verification")
     async def resend_verification(request: Request) -> dict[str, str]:
-        """Otro enlace de confirmación. Sin sesión: aún no se puede entrar."""
         body = await request.json()
         email = str(body.get("email") or "").strip().lower()
         if not app.state.verify_limit.allow(client_key(request)) or not app.state.verify_limit.allow(f"mail:{email}"):
@@ -563,7 +509,6 @@ def create_app() -> FastAPI:
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,)) if email else None
         if row is not None and not row["email_verified_at"]:
             send_verification(row["id"], row["name"], row["email"], mailer.locale_of(body.get("locale")))
-        # La misma respuesta en todos los casos: no revela qué correos existen.
         return {"status": "sent"}
 
     @app.post("/api/auth/reset-password")
@@ -582,7 +527,6 @@ def create_app() -> FastAPI:
         if row is None:
             raise HTTPException(status_code=400, detail="Token inválido o vencido")
         db.run(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["user_id"]))
-        # Abrir el enlace del correo también demuestra que la dirección es suya.
         db.run(
             conn, "UPDATE users SET email_verified_at=? WHERE id=? AND email_verified_at=''", (_now(), row["user_id"])
         )
@@ -592,7 +536,6 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ws-ticket")
     def ws_ticket(ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
-        """Ticket de un solo uso para abrir un WebSocket sin depender del host."""
         row = user_from_cookie(ia_session)
         return {"ticket": issue_ws_ticket(row["id"]), "expires_in": WS_TICKET_TTL_S}
 
@@ -616,8 +559,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="El email ya está registrado")
         if email == row["email"]:
             return {"email": email, "pending_email": ""}
-        # El cambio se aplica al confirmar la dirección nueva: hasta entonces
-        # se sigue entrando con la actual (y una errata no deja fuera a nadie).
         send_verification(row["id"], row["name"], email, mailer.locale_of(body.get("locale")))
         return {"email": row["email"], "pending_email": email}
 
@@ -649,7 +590,6 @@ def create_app() -> FastAPI:
 
     @app.get("/api/system/preflight")
     def system_preflight(ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
-        """Diagnóstico de preparación del motor (solo lectura)."""
         user_from_cookie(ia_session)
         from app.application.pipeline.preflight import run_preflight
 
@@ -667,7 +607,6 @@ def create_app() -> FastAPI:
         row = user_from_cookie(ia_session)
         _warm_live_models()
         projects = db.many(conn, "SELECT * FROM projects WHERE user_id=? ORDER BY created_at DESC", (row["id"],))
-        # Rellena duración/miniatura de proyectos antiguos (una sola vez).
         projects = [_ensure_project_metadata(conn, paths["input"], p) for p in projects]
         jobs = db.many(conn, "SELECT * FROM jobs WHERE user_id=? ORDER BY created_at DESC LIMIT 20", (row["id"],))
         return {"videos": [_project(p) for p in projects], "jobs": [_job(j) for j in jobs]}
@@ -696,9 +635,6 @@ def create_app() -> FastAPI:
         max_bytes = int(os.environ.get("IA_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
         project_id = str(uuid.uuid4())
 
-        # Con Storage configurado el archivo NO se queda en disco: se copia a un
-        # temporal, se sube al bucket y el temporal se borra. Sin Storage se
-        # mantiene el comportamiento local de siempre.
         use_storage = media_store.configured()
         if use_storage:
             target = paths["temp"] / "uploads" / f"{project_id}-{filename}"
@@ -710,7 +646,6 @@ def create_app() -> FastAPI:
             folder.mkdir(parents=True, exist_ok=True)
             target = folder / filename
 
-        # Streaming a disco: el archivo NUNCA se carga entero en RAM.
         written = 0
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -739,7 +674,6 @@ def create_app() -> FastAPI:
             target.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail="El archivo está vacío")
 
-        # Duración y miniatura se calculan sobre el temporal, antes de subirlo.
         duration_ms = _probe_duration_ms(target)
 
         if use_storage:
@@ -756,8 +690,6 @@ def create_app() -> FastAPI:
             except Exception as exc:  # noqa: BLE001
                 target.unlink(missing_ok=True)
                 thumb_temp.unlink(missing_ok=True)
-                # El plan gratuito de Supabase rechaza archivos grandes con 413:
-                # conviene decirlo en claro en vez de mostrar el error crudo.
                 if "413" in str(exc):
                     raise HTTPException(
                         status_code=413,
@@ -771,9 +703,6 @@ def create_app() -> FastAPI:
             finally:
                 thumb_temp.unlink(missing_ok=True)
 
-            # El archivo ya está en disco: se conserva hasta que el trabajo lo
-            # procese, para no volver a descargarlo de Storage. Se borra al
-            # terminar (o al arrancar la API si quedó huérfano).
             try:
                 suffix = target.suffix
                 pending = media_store.pending_path(paths["temp"], project_id, suffix)
@@ -808,12 +737,6 @@ def create_app() -> FastAPI:
                 _now(), duration_ms, thumb_value, _now(),
             ),
         )
-        # El procesamiento arranca YA, al terminar la subida: antes el job quedaba
-        # en PENDING hasta pulsar «Producir» y la primera reproducción empezaba
-        # sin nada preparado. El proceso del proyecto (`live`) empieza a leer el
-        # audio desde la copia local de la subida, sin esperar a la cola.
-        # Sin worker (pruebas, despliegues de sólo lectura) no hay quién procese:
-        # el job queda preparado y «Producir» informará del motivo.
         job_id = _create_job(conn, project_id, row["id"], "progressive", start=app.state.worker_enabled)
         uploaded = db.one(conn, "SELECT * FROM projects WHERE id=?", (project_id,))
         if uploaded is not None and app.state.worker_enabled:
@@ -843,7 +766,6 @@ def create_app() -> FastAPI:
 
         render.forget(paths["output"], project_id)
 
-        # Al borrar el proyecto también se borra su objeto del almacenamiento.
         media_path = project["media_path"]
         if media_store.is_remote(media_path):
             key = media_store.object_key(media_path)
@@ -888,8 +810,6 @@ def create_app() -> FastAPI:
         project = _own_project(conn, project_id, row["id"])
         media_path = project["media_path"]
 
-        # En Storage: se redirige a una URL firmada y el navegador descarga
-        # directamente de Supabase, con soporte de Range para el seek.
         if media_store.is_remote(media_path):
             url = media_store.signed_url(media_path, expires_in=3600)
             if url:
@@ -910,12 +830,6 @@ def create_app() -> FastAPI:
         since_index: int = 0,
         ia_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
-        """Cues de un idioma, opcionalmente sólo el tramo pedido.
-
-        Permite al reproductor pedir únicamente lo que necesita mientras el
-        procesamiento sigue: `start_ms`/`end_ms` acotan por tiempo y
-        `since_index` devuelve sólo lo nuevo.
-        """
         row = user_from_cookie(ia_session)
         _own_project(conn, project_id, row["id"])
         if not lang:
@@ -953,17 +867,10 @@ def create_app() -> FastAPI:
 
     @app.get("/api/videos/{project_id}/audio-check")
     def audio_check(project_id: str, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
-        """FFprobe del original y del procesado: certifica que hay audio.
-
-        El motor nunca reescribe el vídeo; esta comprobación lo demuestra en
-        lugar de darlo por supuesto.
-        """
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
         media_path = project["media_path"]
 
-        # Si el original está en Storage se descarga a un temporal sólo para
-        # poder pasarle ffprobe, y se borra al terminar.
         remote = media_store.is_remote(media_path)
         media: Path | None = None
         try:
@@ -1018,7 +925,6 @@ def create_app() -> FastAPI:
         frames: int = 14,
         ia_session: str | None = Cookie(default=None),
     ) -> FileResponse:
-        """Tira de miniaturas para la línea de tiempo (una sola imagen)."""
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
         media_path = project["media_path"]
@@ -1067,12 +973,6 @@ def create_app() -> FastAPI:
         request: Request,
         ia_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
-        """Arranca la producción de subtítulos en segundo plano.
-
-        Es el botón «Producir»: separa la carga del vídeo del procesamiento.
-        Si ya hay un job activo para el proyecto, devuelve ese mismo en lugar
-        de lanzar otro (evita duplicar trabajo).
-        """
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
 
@@ -1085,7 +985,6 @@ def create_app() -> FastAPI:
         if mode not in {"progressive", "full"}:
             mode = "progressive"
 
-        # Trabajo realmente en curso: no se duplica.
         running = db.one(
             conn,
             "SELECT id FROM jobs WHERE project_id=? AND status IN "
@@ -1096,8 +995,6 @@ def create_app() -> FastAPI:
         if running is not None:
             return {"id": running["id"], "reused": True, "mode": mode}
 
-        # Job preparado al subir pero nunca arrancado: se encola ESTE, sin crear
-        # otro. Un PENDING no está en curso, así que no puede darse por activo.
         pending = db.one(
             conn,
             "SELECT id FROM jobs WHERE project_id=? AND status='PENDING' "
@@ -1115,16 +1012,6 @@ def create_app() -> FastAPI:
 
     @app.websocket("/api/jobs/{job_id}/events")
     async def job_events(socket: WebSocket, job_id: str) -> None:
-        """Eventos del job en tiempo real: progreso y subtítulos nuevos.
-
-        No sustituye a la base de datos (fuente de verdad): si el cliente se
-        conecta tarde o pierde eventos, puede reconstruir el estado con
-        `/api/jobs/{id}/progress` y `/api/subtitles/{id}`.
-
-        IMPORTANTE: toda consulta a SQLite se hace en un hilo aparte. El acceso
-        es síncrono y con lock global; hacerlo aquí bloquearía el bucle de
-        eventos y, con muchas conexiones, dejaría al worker sin poder avanzar.
-        """
         import asyncio
 
         await socket.accept()
@@ -1147,7 +1034,6 @@ def create_app() -> FastAPI:
 
         channel = worker.subscribe(job_id)
         try:
-            # Estado inicial: el cliente no necesita sondear para arrancar.
             current = await asyncio.to_thread(db.one, conn, "SELECT * FROM jobs WHERE id=?", (job_id,))
             if current is not None:
                 await socket.send_json({"type": "snapshot", **_job(current)})
@@ -1164,7 +1050,6 @@ def create_app() -> FastAPI:
                     if event.get("type") in {"processing_completed", "processing_failed"}:
                         break
                     continue
-                # Sin eventos: se mantiene viva y se detecta el fin desde la BD.
                 row_now = await asyncio.to_thread(
                     db.one, conn, "SELECT * FROM jobs WHERE id=?", (job_id,)
                 )
@@ -1291,7 +1176,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="No hay subtítulos")
         return Response(content=zip_exports(files), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project_id}.zip"'})
 
-    # --- Vídeo con los subtítulos incrustados ------------------------------
     def _render_track(project_id: str, user_id: str, lang: str) -> tuple[Any, list[Any], str]:
         project = _own_project(conn, project_id, user_id)
         row = db.one(conn, "SELECT * FROM subtitles WHERE project_id=? AND language=?", (project_id, lang))
@@ -1300,12 +1184,10 @@ def create_app() -> FastAPI:
         cues = [cue_from_dict(item) for item in json.loads(row["cues_json"])]
         if not cues:
             raise HTTPException(status_code=409, detail="La pista todavía no tiene subtítulos")
-        # La marca de la pista: si se edita, el vídeo se vuelve a renderizar.
         return project, cues, str(row["updated_at"] or "")
 
     @app.post("/api/videos/{project_id}/render")
     async def start_render(project_id: str, request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
-        """Prepara el MP4 con los subtítulos de un idioma incrustados."""
         from app.presentation.api import live, render
 
         row = user_from_cookie(ia_session)
@@ -1338,7 +1220,6 @@ def create_app() -> FastAPI:
 
         row = user_from_cookie(ia_session)
         project, _cues, _stamp = _render_track(project_id, row["id"], lang)
-        # El último MP4 preparado, aunque la pista haya cambiado después.
         video = render.ready_file(paths["output"], project_id, lang)
         if video is None:
             raise HTTPException(status_code=404, detail="El vídeo todavía no está listo")
@@ -1355,16 +1236,6 @@ def create_app() -> FastAPI:
 
     @app.websocket("/api/videos/{project_id}/live")
     async def live_subtitles(socket: WebSocket, project_id: str) -> None:
-        """Subtítulos progresivos del proyecto, por delante del cabezal.
-
-        Se engancha al proceso ÚNICO del proyecto (lo arranca si no existe y el
-        vídeo aún no está completo). Al conectar envía una instantánea con todo
-        lo generado hasta ahora (`snapshot`, con su `seq`), así que conectarse
-        tarde o reconectar no pierde segmentos; después, cada lote nuevo
-        (`cues`) con su número de secuencia. El cliente informa de la posición
-        del reproductor y del idioma (`{"type": "position", ...}`) para que se
-        procese primero lo que se está viendo.
-        """
         import asyncio
 
         from app.presentation.api import live
@@ -1385,8 +1256,6 @@ def create_app() -> FastAPI:
             (project_id,),
         )
         if job is not None and _job_is_running(str(job["status"])) and str(job["mode"]) == "full":
-            # El pipeline completo (T01→T15) usa su propia cadena: sus eventos
-            # llegan por el canal del job.
             await socket.send_json({"type": "busy"})
             await socket.close()
             return
@@ -1402,7 +1271,6 @@ def create_app() -> FastAPI:
                 code in existing and existing[code][1] >= duration for code in languages
             )
             if done:
-                # Vídeo ya procesado: no se relanza nada (cero trabajo duplicado).
                 tracks = {code: [dict(c, id=live.segment_id(code, c["start_ms"], c["end_ms"]))
                                  for c in cues] for code, (cues, _cov) in existing.items()}
                 covered = {code: [[0, cov]] for code, (_cues, cov) in existing.items()}
@@ -1431,7 +1299,6 @@ def create_app() -> FastAPI:
         async def _sender() -> None:
             while True:
                 event = await outbox.get()
-                # Lo ya incluido en la instantánea no se repite.
                 if int(event.get("seq", 0)) <= int(snapshot["seq"]):
                     continue
                 await socket.send_json(event)
@@ -1453,13 +1320,6 @@ def create_app() -> FastAPI:
 
     @app.websocket("/api/realtime")
     async def realtime(socket: WebSocket) -> None:
-        """Subtitulado en vivo.
-
-        IMPORTANTE: Whisper y M2M100 (carga incluida) se ejecutan en un hilo.
-        Hacerlo en el bucle de eventos congelaba TODO el servidor mientras
-        transcribía: cualquier petición HTTP (p. ej. la lista de proyectos)
-        esperaba decenas de segundos y Next cortaba la respuesta.
-        """
         import asyncio
 
         await socket.accept()
@@ -1480,11 +1340,6 @@ def create_app() -> FastAPI:
             await socket.send_json({"type": "error", "message": f"ASR en vivo no disponible: {exc}"})
             await socket.close()
             return
-        # La recepción NO espera a la transcripción: un lector deja los mensajes
-        # en cola y el procesador toma TODO lo acumulado en cada vuelta. Antes
-        # se transcribía trama a trama; Whisper en CPU es más lento que el audio,
-        # la cola crecía y cada subtítulo llegaba más tarde que el anterior
-        # (segundos por detrás del vídeo), así que nunca llegaba a verse.
         inbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
         async def _reader() -> None:
@@ -1511,8 +1366,6 @@ def create_app() -> FastAPI:
                     batch.append(item)
                 events = await asyncio.to_thread(session.handle_batch, batch)
                 if not warming and session.targets and hasattr(session.translator, "warm"):
-                    # Con un idioma de destino ya configurado, el traductor se
-                    # precarga en paralelo mientras llega el primer audio.
                     warming = True
                     asyncio.get_running_loop().run_in_executor(None, session.translator.warm)
                 for event in events:
@@ -1522,7 +1375,6 @@ def create_app() -> FastAPI:
         except WebSocketDisconnect:
             return
         except RuntimeError:
-            # El cliente cerró mientras se transcribía: enviar ya no procede.
             return
         finally:
             reader.cancel()
@@ -1549,14 +1401,6 @@ def _project(row: Any) -> dict[str, Any]:
 def _create_job(
     conn: Any, project_id: str, user_id: str, mode: str = "progressive", *, start: bool = True
 ) -> str:
-    """Crea el job y, opcionalmente, lo encola.
-
-    `mode='progressive'` (por defecto) publica subtítulos mientras procesa;
-    `mode='full'` ejecuta el pipeline completo T01→T15.
-
-    Con `start=False` el job queda listo en `PENDING` sin arrancar: es lo que
-    permite separar «el vídeo está cargado» de «producir subtítulos».
-    """
     if mode not in {"progressive", "full"}:
         mode = "progressive"
     job_id = str(uuid.uuid4())
@@ -1596,7 +1440,6 @@ def _job(row: Any) -> dict[str, Any]:
     }
 
 
-# Estados en los que el worker ya NO escribe pistas.
 _SETTLED_STATUSES = {"PENDING", "COMPLETED", "FAILED", "CANCELLED", "PARTIAL", "SUCCESS"}
 
 
@@ -1605,15 +1448,6 @@ def _job_is_running(status: str) -> bool:
 
 
 def _track_view(project_id: str, row: Any, *, processing: bool) -> dict[str, Any]:
-    """Pista de un idioma tal como la consume el reproductor.
-
-    Contrato de tiempos: `start_ms`/`end_ms` son milisegundos ENTEROS sobre la
-    línea temporal del vídeo original (nunca relativos a una ventana de audio).
-    Un cue está activo en el instante `t` cuando `start_ms <= t < end_ms`.
-
-    `covered_ms` dice hasta dónde está procesada ESTA pista; con `status`
-    `processing` el reproductor sabe qué tramos siguen pendientes.
-    """
     language = str(row["language"])
     try:
         raw = json.loads(row["cues_json"])
@@ -1664,7 +1498,6 @@ def _live_translator(session: RealtimeSession):
     import threading
 
     holder: dict[str, Any] = {}
-    # M2M100 no es reentrante: precarga y traducciones se serializan.
     lock = threading.Lock()
 
     def _run(text: str, partial: bool) -> dict[str, str]:
@@ -1680,7 +1513,6 @@ def _live_translator(session: RealtimeSession):
             )(text, partial)
 
     def _warm() -> None:
-        """Carga M2M100 (~16 s en CPU) antes de la primera frase, no durante."""
         try:
             _run("ok", False)
         except Exception:  # noqa: BLE001 - optimización: la traducción real informará

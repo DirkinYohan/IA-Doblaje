@@ -1,11 +1,3 @@
-"""Infrastructure — Adapter M2M100 (facebook/m2m100_418M) local offline.
-
-Carga exclusivamente desde models/m2m100_418M/. SIN descargas en runtime.
-Implementa TranslationModelLoaderPort + TranslatorPort.
-
-Determinismo: do_sample=False, num_beams=1 (greedy). Sin seed manual
-(greedy no muestrea; la salida es determinista por construcción).
-"""
 from __future__ import annotations
 
 import os
@@ -21,7 +13,6 @@ from app.domain.value_objects.translation import TranslationLanguageCode
 
 MODEL_FOLDERNAME = "m2m100_418M"
 
-# Archivos físicos requeridos del modelo local (verificación pre-carga)
 REQUIRED_FILES: tuple[str, ...] = (
     "config.json",
     "pytorch_model.bin",
@@ -31,15 +22,12 @@ REQUIRED_FILES: tuple[str, ...] = (
     "special_tokens_map.json",
 )
 
-# Lazy singleton global para no recargar el modelo entre llamadas
 _LAZY_MODEL: Any = None
 _LAZY_TOKENIZER: Any = None
 _LAZY_LOADED_PATH: str | None = None
 
 
 class M2M100TranslationModelLoader(TranslationModelLoaderPort):
-    """Valida y carga el modelo M2M100 local (offline)."""
-
     def __init__(self, settings_getter: Any | None = None) -> None:
         self._settings_getter = settings_getter
 
@@ -57,7 +45,6 @@ class M2M100TranslationModelLoader(TranslationModelLoaderPort):
         return self._get_models_dir() / MODEL_FOLDERNAME
 
     def validate(self) -> Path:
-        """Valida que el modelo local exista y esté completo."""
         d = self._model_dir()
         if not d.is_dir():
             raise ModelLoadError(
@@ -76,13 +63,6 @@ class M2M100TranslationModelLoader(TranslationModelLoaderPort):
         return d
 
     def load(self) -> Any:
-        """Carga modelo + tokenizer local. Devuelve (model, tokenizer).
-
-        Se reintenta una vez desde cero: en procesos largos el estado global de
-        torch puede quedar alterado y la primera carga falla con errores
-        crípticos del backend. Un reintento limpio evita perder la traducción
-        por un fallo transitorio.
-        """
         try:
             return self._load_once()
         except ModelLoadError:
@@ -125,13 +105,6 @@ class M2M100TranslationModelLoader(TranslationModelLoaderPort):
 
 
 class M2M100TranslatorAdapter(TranslatorPort):
-    """Traduce el segmento actual con M2M100. Offline. Determinista.
-
-    El contexto (anterior/siguiente/speaker/duración) NO se inyecta al modelo
-    (M2M100 no es conversacional). El contexto queda para la lógica de
-    adaptación/validación del UseCase.
-    """
-
     def __init__(
         self,
         *,
@@ -162,7 +135,6 @@ class M2M100TranslatorAdapter(TranslatorPort):
         speaker_label: str | None = None,
         duration_ms: int | None = None,
     ) -> str:
-        """Traduce source_text. Una salida degenerada es un error, no el texto fuente."""
         text = str(source_text).strip()
         if not text:
             return ""
@@ -204,7 +176,6 @@ class M2M100TranslatorAdapter(TranslatorPort):
         source_language: TranslationLanguageCode,
         target_language: TranslationLanguageCode,
     ) -> list[str]:
-        """Traduce un lote del mismo par de idiomas. Una sola pasada de generate."""
         if not texts:
             return []
         model, tokenizer = self._get_engine()
@@ -250,10 +221,8 @@ class M2M100TranslatorAdapter(TranslatorPort):
         s = str(text).strip()
         if not s:
             return True
-        # >3 repeticiones del mismo carácter (p. ej. '¡¡¡¡ ¡¡¡¡...')
         if re.search(r"(.)\1{3,}", s):
             return True
-        # Sin letras y con longitud > 3 (solo puntuación/ruido)
         if len(s) > 3 and not re.search(r"[A-Za-z\u00C0-\u017F]", s):
             return True
         return False

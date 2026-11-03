@@ -1,8 +1,3 @@
-"""Value Objects de audio/multimedia — Capa DOMAIN. Pydantic V2 native Annotated.
-
-Todos son inmutables vía Pydantic frozen=True en las entidades.
-Sin dependencias de Application ni Infrastructure.
-"""
 from __future__ import annotations
 
 import re
@@ -10,11 +5,6 @@ from typing import Annotated, Any, NewType
 
 from pydantic import Field, field_validator
 from pydantic.functional_validators import AfterValidator
-
-
-# ---------------------------------------------------------------------------
-# Helpers validadores
-# ---------------------------------------------------------------------------
 
 
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
@@ -85,11 +75,6 @@ def _validate_file_bytes(v: Any) -> int:
     return value
 
 
-# ---------------------------------------------------------------------------
-# Tipos públicos (alias + validators). Pydantic V2 usa Annotated[BaseType, AfterValidator(...)]
-# ---------------------------------------------------------------------------
-
-
 SampleRate = Annotated[int, AfterValidator(_validate_sample_rate)]
 ChannelCount = Annotated[int, AfterValidator(_validate_channel_count)]
 BitDepth = Annotated[int, AfterValidator(_validate_bit_depth)]
@@ -97,7 +82,6 @@ AudioDuration = Annotated[float, AfterValidator(_validate_audio_duration)]
 Sha256Hash = Annotated[str, AfterValidator(_validate_sha256_hash)]
 FileBytes = Annotated[int, AfterValidator(_validate_file_bytes)]
 
-# Exports para runtime helpers (tests)
 __all__ = [
     "SampleRate",
     "ChannelCount",

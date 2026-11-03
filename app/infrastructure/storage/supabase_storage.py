@@ -1,20 +1,3 @@
-"""Almacenamiento de archivos en Supabase Storage.
-
-Los vídeos y las miniaturas no viven en PostgreSQL: van a un bucket y en la
-base de datos solo se guarda la clave del objeto (``media/<project>/video.mp4``).
-
-Se habla con la API REST de Storage por HTTPS, así que no hace falta el SDK de
-Supabase ni S3: ``httpx`` ya está en el proyecto.
-
-Configuración (en `.env`):
-
-    SUPABASE_URL=https://<ref>.supabase.co
-    SUPABASE_SERVICE_ROLE_KEY=eyJ...
-    SUPABASE_BUCKET=media
-
-Sin esas variables ``configured()`` devuelve False y la aplicación sigue
-guardando en disco, para que nada se rompa en desarrollo.
-"""
 from __future__ import annotations
 
 import os
@@ -27,12 +10,10 @@ DEFAULT_BUCKET = "media"
 
 
 class StorageError(RuntimeError):
-    """Fallo al hablar con el almacenamiento remoto."""
+    pass
 
 
 class SupabaseStorage:
-    """Cliente mínimo de Supabase Storage: subir, bajar, borrar y firmar."""
-
     def __init__(
         self,
         *,
@@ -46,10 +27,8 @@ class SupabaseStorage:
         self._key = service_key
         self._timeout = timeout
 
-    # -- configuración ---------------------------------------------------
     @classmethod
     def from_env(cls) -> "SupabaseStorage | None":
-        """Instancia desde el entorno, o None si no está configurado."""
         url = env("SUPABASE_URL")
         key = env("SUPABASE_SERVICE_ROLE_KEY")
         if not url or not key:
@@ -62,7 +41,6 @@ class SupabaseStorage:
         load_project_env()
         return bool(env("SUPABASE_URL") and env("SUPABASE_SERVICE_ROLE_KEY"))
 
-    # -- utilidades ------------------------------------------------------
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {
             "Authorization": f"Bearer {self._key}",
@@ -75,9 +53,7 @@ class SupabaseStorage:
     def _object_url(self, key: str) -> str:
         return f"{self.url}/storage/v1/object/{self.bucket}/{key.lstrip('/')}"
 
-    # -- operaciones -----------------------------------------------------
     def ensure_bucket(self, *, public: bool = False) -> None:
-        """Crea el bucket si no existe. Idempotente."""
         import httpx
 
         payload = {
@@ -94,7 +70,6 @@ class SupabaseStorage:
                     headers=self._headers({"Content-Type": "application/json"}),
                     json=payload,
                 )
-            # 400/409 = ya existe: es el estado que buscamos.
             if response.status_code in {400, 409}:
                 return
             if response.status_code >= 400:
@@ -106,7 +81,6 @@ class SupabaseStorage:
             raise StorageError(f"error de red creando el bucket: {exc}") from exc
 
     def upload_file(self, key: str, source: Path, content_type: str) -> str:
-        """Sube un archivo local. Devuelve la clave guardada."""
         import httpx
 
         if not source.is_file():
@@ -152,7 +126,6 @@ class SupabaseStorage:
         return key
 
     def download_to(self, key: str, target: Path) -> Path:
-        """Descarga un objeto a un archivo local (temporal de trabajo)."""
         import httpx
 
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -204,7 +177,6 @@ class SupabaseStorage:
         return response.status_code < 400
 
     def signed_url(self, key: str, *, expires_in: int = 3600) -> str:
-        """URL temporal para un bucket privado."""
         import httpx
 
         try:

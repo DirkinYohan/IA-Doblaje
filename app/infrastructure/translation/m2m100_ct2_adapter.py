@@ -1,14 +1,3 @@
-"""M2M100 418M sobre CTranslate2 (int8, CPU). Offline.
-
-Misma interfaz de lote que ``M2M100TranslatorAdapter.translate_batch`` pero con
-el motor de inferencia que ya usa Whisper. Medido en este equipo (CPU, 12
-hilos) con tres frases en→es: carga 1,5 s frente a 12,4 s y traducción 0,65 s
-frente a 2,6 s, con el mismo resultado. Es lo que permite traducir por delante
-de la reproducción en el modo en vivo.
-
-El modelo convertido se genera con ``scripts/convert_m2m100_ct2.py`` a partir
-del modelo local ``models/m2m100_418M`` (de él también sale el tokenizador).
-"""
 from __future__ import annotations
 
 import threading
@@ -33,8 +22,6 @@ def is_available(root: Path | None = None) -> bool:
 
 
 class M2M100CT2Translator:
-    """Traductor por lotes. No es reentrante: el llamador serializa."""
-
     def __init__(self, root: Path | None = None, *, max_length: int = 128) -> None:
         self.root = root or models_dir()
         self.max_length = int(max_length)
@@ -72,7 +59,7 @@ class M2M100CT2Translator:
         )
         out: list[str] = []
         for result in results:
-            tokens = result.hypotheses[0][1:]  # sin la etiqueta de idioma
+            tokens = result.hypotheses[0][1:]
             ids = tokenizer.convert_tokens_to_ids(tokens)
             out.append(tokenizer.decode(ids, skip_special_tokens=True).strip())
         return out

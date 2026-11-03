@@ -1,11 +1,3 @@
-"""Value Objects Translation Step 15 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura
-(no transformers/torch/filesystem).
-
-Idiomas oficiales T15 (exactamente 8):
-    es, en, fr, de, it, pt, ja, zh
-"""
 from __future__ import annotations
 
 import math
@@ -22,14 +14,8 @@ from pydantic import (
 )
 from pydantic.functional_validators import BeforeValidator
 
-# ---------------------------------------------------------------------------
-# 1) Idiomas oficiales
-# ---------------------------------------------------------------------------
-
 
 class TranslationLanguage(str, Enum):
-    """Idiomas oficiales soportados."""
-
     ES = "es"
     EN = "en"
     FR = "fr"
@@ -67,11 +53,6 @@ def _validate_language_code(v: object) -> str:
 
 
 TranslationLanguageCode = Annotated[str, BeforeValidator(_validate_language_code)]
-
-
-# ---------------------------------------------------------------------------
-# 2) Value objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_ms_ge_zero(v: object) -> int:
@@ -112,14 +93,7 @@ def _validate_float_ge0(v: object) -> float:
 TranslationFloat = Annotated[float, BeforeValidator(_validate_float_ge0)]
 
 
-# ---------------------------------------------------------------------------
-# 3) TranslationSegmentValidation (por segmento)
-# ---------------------------------------------------------------------------
-
-
 class TranslationSegmentValidation(BaseModel):
-    """Validación por segmento de traducción."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     ok: bool = Field(True)
@@ -127,23 +101,7 @@ class TranslationSegmentValidation(BaseModel):
     warnings: tuple[str, ...] = Field(default_factory=tuple)
 
 
-# ---------------------------------------------------------------------------
-# 4) TranslationSegment (1:1 con segments.json)
-# ---------------------------------------------------------------------------
-
-
 class TranslationSegment(BaseModel):
-    """Segmento traducido/adaptado. 1:1 con segments.json.
-
-    Garantías:
-      - segment_index >= 0
-      - start_ms < end_ms
-      - duration_ms == end_ms - start_ms (recomputado)
-      - source_text conservado
-      - translated_text no vacío si source_text no vacío
-      - adapted_text no vacío si source_text no vacío
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     segment_index: int = Field(..., ge=0)
@@ -178,7 +136,6 @@ class TranslationSegment(BaseModel):
         expected = int(self.end_ms) - int(self.start_ms)
         if self.duration_ms != expected:
             object.__setattr__(self, "duration_ms", expected)
-        # 1:1: si hay texto fuente, debe haber traducción y adaptación
         if str(self.source_text).strip() and not str(self.translated_text).strip():
             raise ValueError("translated_text vacío con source_text no vacío")
         if str(self.source_text).strip() and not str(self.adapted_text).strip():
@@ -190,14 +147,7 @@ class TranslationSegment(BaseModel):
         return self.duration_ms / 1000.0
 
 
-# ---------------------------------------------------------------------------
-# 5) TranslationValidation (global)
-# ---------------------------------------------------------------------------
-
-
 class TranslationValidation(BaseModel):
-    """Validación global T15."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     ok: bool = Field(True)
@@ -218,18 +168,7 @@ class TranslationValidation(BaseModel):
         return self
 
 
-# ---------------------------------------------------------------------------
-# 6) TranslationThresholds (adaptación para doblaje)
-# ---------------------------------------------------------------------------
-
-
 class TranslationThresholds(BaseModel):
-    """Umbrales configurables T15 (adaptación para doblaje).
-
-    max_chars_per_second = 18.0   (velocidad de locución doblada)
-    max_adaptation_ratio   = 1.35 (expansión máx traducción/original)
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_chars_per_second: float = Field(

@@ -12,8 +12,6 @@ from app.domain.value_objects.asr import AsrThresholds
 
 @runtime_checkable
 class ASRModelLoaderPort(Protocol):
-    """Port para cargar un modelo ASR local 100% offline."""
-
     def load(
         self,
         model_folder: Path,
@@ -21,14 +19,11 @@ class ASRModelLoaderPort(Protocol):
         device: str,
         compute_type: str | None = None,
     ) -> Any:
-        """Retorna el modelo ASR cargado (tipo Any = backend concreto)."""
         ...
 
 
 @runtime_checkable
 class ASRPort(Protocol):
-    """Port principal del motor ASR Step 06. El UseCase depende ÚNICAMENTE de este."""
-
     def transcribe(
         self,
         preprocessed_audio: PreprocessedAudio,
@@ -38,5 +33,4 @@ class ASRPort(Protocol):
         thresholds: AsrThresholds | None = None,
         job_id: str | None = None,
     ) -> ASRResult:
-        """Ejecuta la transcripción. Retorna ASRResult frozen forbid."""
         ...

@@ -17,10 +17,7 @@ from app.domain.entities.vad import VadResult, VoiceInterval
 from app.domain.interfaces.timestamp_ports import TimestampNormalizerPort
 from app.domain.value_objects.timestamps import AsrTimestampThresholds
 
-# =========================================================================
-# Helpers factories: model_construct frozen igual que en T05/T06 tests
-# =========================================================================
-_SHA = "a" * 64  # dummy sha chain binding
+_SHA = "a" * 64
 
 def _mk_prep(duration_sec: float = 10.0) -> PreprocessedAudio:
     return PreprocessedAudio.model_construct(
@@ -128,9 +125,6 @@ def _mk_asr(
     )
 
 
-# =========================================================================
-# Fake Ports (duck typing TimestampNormalizerPort)
-# =========================================================================
 class _FakeOKNormalizer(TimestampNormalizerPort):
     def __init__(self):
         self.calls: list = []
@@ -139,7 +133,6 @@ class _FakeOKNormalizer(TimestampNormalizerPort):
     def normalize(self, prep, *, vad_result, lid_result, asr_result, thresholds=None, job_id=None):
         self.normalize_called_count += 1
         self.calls.append((prep, vad_result, lid_result, asr_result, thresholds, job_id))
-        # Construir TimestampGenerationResult frozen chain
         segs = []
         for i, seg in enumerate(asr_result.segments):
             s = seg.start_ms if seg.start_ms is not None else 0
@@ -173,7 +166,6 @@ class _FakeErrorNormalizer(TimestampNormalizerPort):
 
 
 class _FakeReturnWordsNonEmpty(TimestampNormalizerPort):
-    """Adapter malicioso: devuelve len(words)>0. UseCase debe rechazar (D#1)."""
     def normalize(self, prep, *, vad_result, lid_result, asr_result, thresholds=None, job_id=None):
         segs = []
         for i, seg in enumerate(asr_result.segments):
@@ -198,9 +190,6 @@ class _FakeReturnWordsNonEmpty(TimestampNormalizerPort):
         )
 
 
-# =========================================================================
-# Tests Application (≥ 16)
-# =========================================================================
 class TestGenerateTimestampsUseCaseHappy:
     def test_happy_path_two_segments_builds_timestamps(self):
         p = _mk_prep()
@@ -288,13 +277,12 @@ class TestGenerateTimestampsUseCaseNoneInputs:
 
 class TestGenerateTimestampsUseCaseChainMismatch:
     def test_mismatch_prep_vad(self):
-        p1 = _mk_prep(); p2 = _mk_prep()  # diferentes SHA (no, mismo dummy)
-        # Corregir: dar a p2 un sha diferente manualmente
+        p1 = _mk_prep(); p2 = _mk_prep()
         p2 = PreprocessedAudio.model_construct(**{
             **{f: getattr(p1, f) for f in PreprocessedAudio.model_fields},
             "sha256": "0" * 64,
         })
-        v = _mk_vad(prep=p1, num=1)  # vad bound to p1 SHA
+        v = _mk_vad(prep=p1, num=1)
         l = _mk_lid(prep=p1)
         a = _mk_asr(prep=p1, vad=v, lid=l)
         uc = GenerateTimestampsUseCase(timestamp_normalizer=_FakeOKNormalizer())
@@ -320,10 +308,9 @@ class TestGenerateTimestampsUseCaseChainMismatch:
             **{f: getattr(p1, f) for f in PreprocessedAudio.model_fields},
             "sha256": "e" * 64,
         })
-        v = _mk_vad(prep=p1, num=1)  # bind p1
-        l = _mk_lid(prep=p2)  # bind p2
-        a = _mk_asr(prep=p2, vad=None, lid=l, segments_crudo=((1000,3000,"x"),))  # bind p2
-        # Para forzar mismatch vad-asr (source_prep p2 == a.source_prep pero vad_reference_sha256 apunta a p1):
+        v = _mk_vad(prep=p1, num=1)
+        l = _mk_lid(prep=p2)
+        a = _mk_asr(prep=p2, vad=None, lid=l, segments_crudo=((1000,3000,"x"),))
         a_tampered = a.model_copy(update={"vad_reference_sha256": p1.sha256})
         uc = GenerateTimestampsUseCase(timestamp_normalizer=_FakeOKNormalizer())
         with pytest.raises(ValidationFailedError, match="mismatch"):
@@ -344,11 +331,11 @@ class TestGenerateTimestampsUseCaseSilentFallbackD2:
         assert len(res.words) == 0
         assert res.transcript_text == ""
         assert res.confidence == 0.0
-        assert fake.normalize_called_count == 0  # Adapter NO invocado
+        assert fake.normalize_called_count == 0
 
     def test_silent_fallback_asr_segments_empty(self):
         p = _mk_prep()
-        v = _mk_vad(prep=p, num=1)  # vad NO 0, pero ASR segments ()
+        v = _mk_vad(prep=p, num=1)
         l = _mk_lid(prep=p)
         a = _mk_asr(prep=p, vad=v, lid=l, strategy="full_audio", segments_crudo=())
         fake = _FakeOKNormalizer()
@@ -400,11 +387,9 @@ class TestGenerateTimestampsUseCaseStrictAndPropagation:
                     transcript_language_code=asr_result.transcript_language_code,
                     segments=(), words=(), job_id=job_id,
                 )
-                # force strict_ok false
                 new_fields = {name: getattr(res_base, name) for name in TimestampGenerationResult.model_fields}
                 new_fields["strict_ok"] = False
                 new_fields["validation_errors"] = ("dummy warn",)
-                # Usar model_construct (frozen bypass pero sí se puede con model_construct)
                 return TimestampGenerationResult.model_construct(**new_fields)
         uc = GenerateTimestampsUseCase(timestamp_normalizer=_FakeNonStrict())
         with pytest.raises(ValidationFailedError):

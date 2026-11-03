@@ -1,4 +1,3 @@
-"""Buzón de pruebas: los correos que `FileMailer` deja en `IA_MAIL_DIR`."""
 from __future__ import annotations
 
 import time
@@ -17,7 +16,6 @@ def read_mails(folder: Path) -> list[dict[str, str]]:
 
 
 def wait_for_mail(folder: Path, kind: str, to: str | None = None, *, count: int = 1, timeout: float = 5) -> dict[str, str]:
-    """El último correo de ese tipo (el envío va en un hilo aparte)."""
     deadline = time.monotonic() + timeout
     while True:
         found = [m for m in read_mails(folder) if m.get("kind") == kind and (to is None or m.get("to") == to)]

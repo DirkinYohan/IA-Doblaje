@@ -1,7 +1,3 @@
-"""Tests unitarios T08 — Domain Value Objects y Entity Diarization.
-
-Solo DOMAIN, sin torch/pyannote/infrastructure. Pydantic + patrón DUT T04/T05.
-"""
 from __future__ import annotations
 
 import copy
@@ -33,11 +29,6 @@ class _LabelDut(BaseModel):
 class _TurnDut(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     v: SpeakerTurn
-
-
-# =============================================================================
-# SpeakerLabel
-# =============================================================================
 
 
 class TestSpeakerLabel:
@@ -78,11 +69,6 @@ class TestSpeakerLabel:
     def test_extra_forbid(self):
         with pytest.raises(ValidationError):
             _LabelDut(v="SPEAKER_00", extra=1)  # type: ignore[call-arg]
-
-
-# =============================================================================
-# SpeakerTurn
-# =============================================================================
 
 
 class TestSpeakerTurn:
@@ -130,11 +116,6 @@ class TestSpeakerTurn:
         assert t.duration_seconds == 1.5
 
 
-# =============================================================================
-# DiarizationThresholds
-# =============================================================================
-
-
 class TestDiarizationThresholds:
     def test_defaults(self):
         th = DiarizationThresholds()
@@ -169,11 +150,6 @@ class TestDiarizationThresholds:
             DiarizationThresholds(min_speaker_duration_ms=0)
         with pytest.raises(ValidationError):
             DiarizationThresholds(min_speaker_duration_ms=1_000_000)
-
-
-# =============================================================================
-# DiarizationResult
-# =============================================================================
 
 
 def _turn(label: str, s: int, e: int) -> SpeakerTurn:

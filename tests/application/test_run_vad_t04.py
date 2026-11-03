@@ -1,14 +1,3 @@
-"""Tests Application UseCase RunVoiceActivityDetectionUseCase T04.
-
-Usa Fake VoiceActivityDetectorPort (no torch, no silero). Verifica:
-- happy path
-- preprocessed_audio=None
-- sample_rate/channels/bit_depth incorrectos
-- chain of custody SHA256
-- MediaPrepResult no modificado
-- determinismo
-- logging structured
-"""
 from __future__ import annotations
 
 import re
@@ -35,9 +24,6 @@ from app.domain.value_objects.vad import (
 )
 from app.application.use_cases.run_vad import RunVoiceActivityDetectionUseCase
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 _SHA = "a" * 64
 _SHA2 = "b" * 64
@@ -57,7 +43,6 @@ class _FakeMediaPrepResultFactory:
         preprocessed_exists: bool = True,
     ) -> MediaPrepResult:
         if preprocessed_exists and not wav_path.exists():
-            # Stub create synthetic minimal WAV? No — caller lo pasa.
             pass
         validated = ValidatedMedia.model_construct(
             original_path=Path(str(wav_path)),
@@ -108,14 +93,7 @@ class _FakeMediaPrepResultFactory:
         )
 
 
-# ---------------------------------------------------------------------------
-# Fake VAD Port
-# ---------------------------------------------------------------------------
-
-
 class FakeVADPort(VoiceActivityDetectorPort):
-    """Retorna VadResult deterministico. NO toca infraestructura."""
-
     def __init__(
         self,
         *,
@@ -124,7 +102,6 @@ class FakeVADPort(VoiceActivityDetectorPort):
         source_sha_override: str | None = None,
         raise_type: type[BaseException] | None = None,
     ) -> None:
-        # default: 2 intervals separated 400ms gap (merge > 200 no merges)
         self._intervals = list(intervals) if intervals else [(100, 300, 0.9), (700, 900, 0.8)]
         self._duration_ms = int(duration_ms)
         self._source_sha_override = source_sha_override
@@ -142,7 +119,6 @@ class FakeVADPort(VoiceActivityDetectorPort):
             raise self._raise_type("port raise test")
         thr = thresholds or VadThresholds()
         total_dur = int(self._duration_ms)
-        # Build intervals (VoiceInterval frozen)
         vis: list[VoiceInterval] = []
         for s, e, c in self._intervals:
             dur_ms = int(e) - int(s)
@@ -200,25 +176,14 @@ class FakeVADPort(VoiceActivityDetectorPort):
         )
 
 
-# ---------------------------------------------------------------------------
-# Fixture
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def _fake_prep_result(tmp_path: Path) -> MediaPrepResult:
     wav = tmp_path / "input.wav"
-    # Crear archivo vacío existente pero tamaño>0.
     wav.parent.mkdir(parents=True, exist_ok=True)
     wav.write_bytes(b"\x00" * 32000)
     return _FakeMediaPrepResultFactory.build(
         wav_path=wav, sha256=_SHA, duration_sec=1.0, size_bytes=32000
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_usecase_happy_path_ok(_fake_prep_result) -> None:
@@ -229,7 +194,6 @@ def test_usecase_happy_path_ok(_fake_prep_result) -> None:
     assert r.num_silences == 3
     assert r.voice_intervals[0].start_ms == 100
     assert r.voice_intervals[1].end_ms == 900
-    # total speech = (300-100)+(900-700) = 400ms → ratio=0.4
     assert r.speech_ratio == pytest.approx(0.4, abs=0.001)
     assert r.total_speech_ms == 400
 
@@ -258,7 +222,6 @@ def test_usecase_preprocessed_none_strict_false_empty_vad(tmp_path) -> None:
     r = uc.execute(mp, strict=False)
     assert r.num_intervals == 0
     assert r.total_speech_ms == 0
-    # Chain of custody → validated.sha256 used when prep is None
     assert str(r.source_preprocessed_sha256) == _SHA
 
 
@@ -302,7 +265,6 @@ def test_usecase_chain_of_custody_sha_mismatch_raises(_fake_prep_result) -> None
 
 
 def test_usecase_does_not_mutate_media_prep_result(_fake_prep_result) -> None:
-    # Guardamos snapshots
     prep_id_a = id(_fake_prep_result.preprocessed_audio)
     prep_sha_a = str(_fake_prep_result.preprocessed_audio.sha256)
     prep_sr_a = int(_fake_prep_result.preprocessed_audio.sample_rate)
@@ -311,7 +273,6 @@ def test_usecase_does_not_mutate_media_prep_result(_fake_prep_result) -> None:
     prep_wp_a = str(_fake_prep_result.preprocessed_audio.wav_path)
     uc = RunVoiceActivityDetectionUseCase(FakeVADPort(duration_ms=1000))
     r = uc.execute(_fake_prep_result)
-    # Post assertions
     assert id(_fake_prep_result.preprocessed_audio) == prep_id_a
     assert str(_fake_prep_result.preprocessed_audio.sha256) == prep_sha_a
     assert int(_fake_prep_result.preprocessed_audio.sample_rate) == prep_sr_a
@@ -342,9 +303,7 @@ def test_usecase_result_deterministic_two_runs(_fake_prep_result) -> None:
     assert a.num_intervals == b.num_intervals
     assert a.total_speech_ms == b.total_speech_ms
     assert a.speech_ratio == pytest.approx(b.speech_ratio)
-    # Mismos intervals
     assert [(v.start_ms, v.end_ms, v.max_confidence) for v in a.voice_intervals] == [
         (v.start_ms, v.end_ms, v.max_confidence) for v in b.voice_intervals
     ]
-    # Chain of custody
     assert a.source_preprocessed_sha256 == b.source_preprocessed_sha256

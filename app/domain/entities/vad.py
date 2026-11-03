@@ -1,8 +1,3 @@
-"""Entidad VadResult Step 04 VAD — Capa DOMAIN.
-
-Frozen + extra=forbid. Chain of custody via source_preprocessed_sha256.
-Sin dependencias infraestructura.
-"""
 from __future__ import annotations
 
 from typing import Literal
@@ -27,13 +22,11 @@ MODEL_LABEL_SILERO_V5_1_LITERAL: Literal["silero-vad:v5.1"] = "silero-vad:v5.1"
 
 
 class VadResult(BaseModel):
-    """Resultado Step 04 Voice Activity Detection. Inmutable. Chain of Custody."""
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
         arbitrary_types_allowed=True,
-        protected_namespaces=(),  # permite field name = model_label (no conflict pydantic internal model_ prefix)
+        protected_namespaces=(),
     )
 
     source_preprocessed_sha256: Sha256Hash = Field(
@@ -62,7 +55,6 @@ class VadResult(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> "VadResult":
-        # (A) intervals sorted asc, start < end, no overlap
         prev_end: int = -1
         for i, vi in enumerate(self.voice_intervals):
             if not int(vi.start_ms) >= 0:
@@ -79,7 +71,6 @@ class VadResult(BaseModel):
                 )
             prev_end = int(vi.end_ms)
 
-        # (B) silence segments sorted asc, no overlap con speech intervals
         prev_s_end: int = -1
         for j, si in enumerate(self.silence_segments):
             if int(si.start_ms) < prev_s_end:
@@ -90,7 +81,6 @@ class VadResult(BaseModel):
                 )
             prev_s_end = int(si.end_ms)
 
-        # (C) total speech + silence debe concordar (~ duración ms, tolerancia 2 ms por redondeos)
         if int(self.duration_ms) > 0:
             diff = abs(
                 (int(self.total_speech_ms) + int(self.total_silence_ms))
@@ -102,7 +92,6 @@ class VadResult(BaseModel):
                     f"{self.total_speech_ms}+{self.total_silence_ms} != {self.duration_ms} diff={diff}"
                 )
 
-        # (D) totals congruentes
         ts = sum(int(v.duration_ms) for v in self.voice_intervals)
         if ts != int(self.total_speech_ms):
             raise ValueError(
@@ -114,7 +103,6 @@ class VadResult(BaseModel):
                 f"total_silence_ms={self.total_silence_ms} != suma silences={tsil}"
             )
 
-        # (E) speech_ratio
         if int(self.duration_ms) > 0:
             expected = round(ts / int(self.duration_ms), 6)
             actual = round(float(self.speech_ratio), 6)
@@ -128,7 +116,6 @@ class VadResult(BaseModel):
         if len(self.silence_segments) != int(self.num_silences):
             raise ValueError("num_silences != len(silence_segments)")
 
-        # (F) source sha 64 hex lower
         sha = str(self.source_preprocessed_sha256).lower().strip()
         if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
             raise ValueError(

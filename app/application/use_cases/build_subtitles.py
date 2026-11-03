@@ -1,7 +1,3 @@
-"""Cues de subtítulo a partir de segmentos ASR ya alineados.
-
-ASR Segment y Subtitle Cue son tipos distintos. Este módulo solo produce cues.
-"""
 from __future__ import annotations
 
 import io

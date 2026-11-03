@@ -1,8 +1,3 @@
-"""UseCase RunLanguageDetectionUseCase — Capa APPLICATION (T05 Step 05 LID).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO importa torch/transformers/whisper/soundfile (clean architecture).
-"""
 from __future__ import annotations
 
 import time
@@ -32,18 +27,9 @@ log = get_logger("app.application.use_cases.run_language_detection")
 
 @dataclass
 class RunLanguageDetectionUseCase:
-    """Orquesta Step 05 Language Detection. Inmutable. DI via constructor.
-
-    Input: (MediaPrepResult, VadResult) — ambos frozen, NO mutados.
-    Output: LanguageDetectionResult frozen con chain of custody triple.
-    """
-
     detector: LanguageDetectorPort
     strict: bool = True
 
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
 
     def execute(
         self,
@@ -53,16 +39,6 @@ class RunLanguageDetectionUseCase:
         job_id: str | None = None,
         thresholds: LanguageDetectionThresholds | None = None,
     ) -> LanguageDetectionResult:
-        """Detectar idioma. NO muta media_prep_result ni vad_result.
-
-        Reglas:
-        1. validar preprocessed_audio presente
-        2. validar 16kHz / mono / 16-bit
-        3. validar chain of custody T03 ↔ T04
-        4. vad sin voz → silent fallback strategy (D#7+D#8)
-        5. delegar a LanguageDetectorPort
-        6. strict=True + conf < threshold.min_confidence → raise LanguageDetectionError / ValidationFailedError
-        """
         jid: str = job_id or media_prep_result.job_id
         bind_context(job_id=jid, phase="LID", model=MODEL_LABEL_WHISPER_LID_V1_LITERAL)
         t0 = time.perf_counter()
@@ -71,7 +47,6 @@ class RunLanguageDetectionUseCase:
             extra={"strict": self.strict, "vad_intervals": int(vad_result.num_intervals)},
         )
 
-        # (1) Existe preprocessed_audio
         prep: PreprocessedAudio | None = media_prep_result.preprocessed_audio
         if prep is None:
             if self.strict:
@@ -87,10 +62,8 @@ class RunLanguageDetectionUseCase:
                 thresholds=thresholds or LanguageDetectionThresholds(),
             )
 
-        # (2) Sanity 16k mono 16-bit + wav exists
         self._sanity_preprocessed_audio(prep)
 
-        # (3) Chain of Custody T03 ↔ T04 (doble bind SHA)
         prep_sha = str(prep.sha256).lower()
         vad_sha_ref = str(vad_result.source_preprocessed_sha256).lower()
         if prep_sha != vad_sha_ref:
@@ -100,7 +73,6 @@ class RunLanguageDetectionUseCase:
                 f"VadResult.source_preprocessed_sha256={vad_sha_ref[:12]}..."
             )
 
-        # (4) Thresholds centralizados (defaults T05 si None).
         thr: LanguageDetectionThresholds = thresholds or LanguageDetectionThresholds()
         log.info(
             "run_lid_thresholds",
@@ -112,7 +84,6 @@ class RunLanguageDetectionUseCase:
             },
         )
 
-        # (5) Sin voz → silent fallback D#8 (NO lanzar error; strategy silent_fallback_none und 0.0).
         if int(vad_result.num_intervals) == 0:
             log.info(
                 "run_lid_silent_no_intervals",
@@ -124,7 +95,6 @@ class RunLanguageDetectionUseCase:
                 vad_sha=vad_sha_ref,
                 thresholds=thr,
             )
-        # (6) speech ratio insignificante → silent fallback también
         elif (
             int(thr.min_speech_ratio_to_analyze) > 0
             and float(vad_result.speech_ratio) < float(thr.min_speech_ratio_to_analyze)
@@ -143,7 +113,6 @@ class RunLanguageDetectionUseCase:
                 thresholds=thr,
             )
         else:
-            # (7) Delegar al Port (Dependency Inversion) — NO conoce Whisper/JIT.
             try:
                 res: LanguageDetectionResult = self.detector.detect(
                     preprocessed=prep,
@@ -159,7 +128,6 @@ class RunLanguageDetectionUseCase:
                     f"run_language_detection unexpected error: {exc!r}"
                 ) from exc
 
-        # (8) Chain of Custody T04 ↔ T05 triple.
         if (
             str(res.source_preprocessed_sha256).lower() != prep_sha
             or str(res.vad_reference_sha256).lower() != vad_sha_ref
@@ -168,12 +136,10 @@ class RunLanguageDetectionUseCase:
                 "Chain of Custody rota T05: LanguageDetectionResult SHA no coincide con T03/T04."
             )
 
-        # (9) Strict threshold: conf < min → error UNLESS silent strategy OR override_lang default.
         if str(res.analyzed_strategy) != LID_STRATEGY_SILENT_FALLBACK:
             if float(res.confidence) < float(thr.min_confidence):
                 if self.strict:
                     if thr.default_language_override is not None:
-                        # D#8 PIPELINE.md: user-specified fallback → reusamos und con conf 0 no, aplicamos override_lang.
                         log.warning(
                             "run_lid_strict_below_threshold_but_override",
                             extra={
@@ -182,7 +148,6 @@ class RunLanguageDetectionUseCase:
                                 "override": str(thr.default_language_override),
                             },
                         )
-                        # Permitimos seguir adelante; adapter debió aplicar override. Confianza = max (conf, 0.0).
                     else:
                         raise LanguageDetectionError(
                             f"run_language_detection strict=True: confianza={res.confidence:.4f} < "
@@ -190,7 +155,6 @@ class RunLanguageDetectionUseCase:
                             f"LanguageDetectionThresholds.default_language_override='xx'."
                         )
                 else:
-                    # D#8 strict=False → devolver und + 0.0 + empty alternatives
                     log.warning(
                         "run_lid_nonstrict_below_threshold_undetermined",
                         extra={
@@ -202,7 +166,6 @@ class RunLanguageDetectionUseCase:
                         res, thresholds=thr,
                     )
 
-        # (10) Inmutabilidad T03/T04: comprobar refs + campos conocidos sin tocar.
         self._assert_not_mutated(media_prep_result, prep, vad_result)
 
         t1 = time.perf_counter()
@@ -218,9 +181,6 @@ class RunLanguageDetectionUseCase:
         )
         return res
 
-    # ------------------------------------------------------------------
-    # HELPERS INTERNOS
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _sanity_preprocessed_audio(prep: PreprocessedAudio) -> None:
@@ -253,7 +213,6 @@ class RunLanguageDetectionUseCase:
         orig_prep_ref: PreprocessedAudio,
         orig_vad_ref: VadResult,
     ) -> None:
-        # Ref check prep
         if media_prep_result.preprocessed_audio is not orig_prep_ref:
             new = media_prep_result.preprocessed_audio
             if new is None:
@@ -270,8 +229,7 @@ class RunLanguageDetectionUseCase:
                 raise ValidationFailedError(
                     "Mutación T03 detectada: PreprocessedAudio alterado durante UseCase LID."
                 )
-        # VadResult frozen checks (por definición no se puede mutar; validamos que num_intervals no cambió ref)
-        if int(orig_vad_ref.num_intervals) != int(orig_vad_ref.num_intervals):  # trivial check frozen
+        if int(orig_vad_ref.num_intervals) != int(orig_vad_ref.num_intervals):
             pass  # pragma: no cover
         if str(orig_vad_ref.source_preprocessed_sha256) != str(orig_prep_ref.sha256):
             raise ValidationFailedError(
@@ -286,7 +244,6 @@ class RunLanguageDetectionUseCase:
         vad_sha: str,
         thresholds: LanguageDetectionThresholds,
     ) -> LanguageDetectionResult:
-        """D#7 D#8: audio sin voz → silent_fallback_none strategy."""
         dur_ms: int = (
             int(round(float(preprocessed.duration_sec) * 1000.0))
             if preprocessed is not None
@@ -320,7 +277,6 @@ class RunLanguageDetectionUseCase:
         *,
         thresholds: LanguageDetectionThresholds,
     ) -> LanguageDetectionResult:
-        """D#8 strict=False conf < threshold → und 0.0. Mantiene chain of custody + strategy."""
         return LanguageDetectionResult(
             source_preprocessed_sha256=str(r.source_preprocessed_sha256),
             vad_reference_sha256=str(r.vad_reference_sha256),

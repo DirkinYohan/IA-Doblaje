@@ -1,8 +1,3 @@
-"""Alta completa en las pruebas: registro, confirmación del correo y login.
-
-Desde que el correo es obligatorio, registrarse ya no abre sesión. Esto hace
-lo que haría el usuario: abrir el enlace del correo y entrar.
-"""
 from __future__ import annotations
 
 from typing import Any
@@ -13,7 +8,6 @@ from tests.fixtures.mailbox import wait_for_mail
 
 
 def sign_up(client: TestClient, json: dict[str, Any]) -> Any:
-    """Devuelve la respuesta del login (200 y los datos del usuario)."""
     registered = client.post("/api/auth/register", json=json)
     assert registered.status_code == 200, registered.text
     email = str(json["email"]).strip().lower()

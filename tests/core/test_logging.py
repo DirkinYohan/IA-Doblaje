@@ -1,9 +1,3 @@
-"""Tests unitarios T02 para app.core.logging.
-
-Mocks: capturamos salida stderr / usamos streams StringIO para no depender
-de consola real. No requiere GPU ni PyTorch.
-"""
-
 from __future__ import annotations
 
 import io
@@ -26,19 +20,7 @@ from app.core.logging import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 class _CaptureLoggingStream:
-    """Context manager para capturar stderr/logs en un buffer.
-
-    Preserva el ProcessorFormatter de structlog que genera setup_logging()
-    para que fmt="json" produzca JSON real y fmt="human" produzca texto
-    coloreado via ConsoleRenderer.
-    """
-
     def __init__(self, fmt: str = "human", level: str = "INFO", env: str = "dev") -> None:
         self._fmt = fmt
         self._level = level
@@ -53,14 +35,12 @@ class _CaptureLoggingStream:
         setup_logging(level=self._level, fmt=self._fmt, env=self._env)
         self._old_handlers = list(logging.getLogger().handlers)
         self._old_level = logging.getLogger().level
-        # Capturar ProcessorFormatter de structlog creado por setup_logging
         root = logging.getLogger()
         formatter: Any = None
         for h in root.handlers:
             if hasattr(h, "formatter") and h.formatter is not None:
                 formatter = h.formatter
                 break
-        # Limpiar handlers antiguos
         root.handlers.clear()
         self._handler = logging.StreamHandler(self.buffer)
         self._handler.setLevel(logging.DEBUG)
@@ -76,7 +56,6 @@ class _CaptureLoggingStream:
         root = logging.getLogger()
         if self._handler is not None:
             root.removeHandler(self._handler)
-        # Restaurar handlers y level originales
         root.handlers.extend(self._old_handlers)
         if self._old_level is not None:
             root.setLevel(self._old_level)
@@ -86,17 +65,11 @@ class _CaptureLoggingStream:
         return self.buffer.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# Tests: setup_logging + get_logger
-# ---------------------------------------------------------------------------
-
-
 def test_setup_logging_no_error() -> None:
-    # Llamarlo varias veces no debe romper
     setup_logging("INFO", fmt="human")
     setup_logging("DEBUG", fmt="json")
-    setup_logging("WARNING")  # fmt default human
-    setup_logging(level="badlevel")  # debe fallback a INFO
+    setup_logging("WARNING")
+    setup_logging(level="badlevel")
     log = get_logger("t02-test")
     assert log is not None
 
@@ -104,14 +77,8 @@ def test_setup_logging_no_error() -> None:
 def test_get_logger_returns_bound_logger() -> None:
     setup_logging()
     log = get_logger("t02-app")
-    # structlog stdlib BoundLogger tiene metodo info/debug
     assert callable(getattr(log, "info", None))
     assert callable(getattr(log, "warning", None))
-
-
-# ---------------------------------------------------------------------------
-# Tests: human renderer (ConsoleRenderer) -> output tiene level + event + logger
-# ---------------------------------------------------------------------------
 
 
 def test_human_logger_output_structure() -> None:
@@ -120,17 +87,9 @@ def test_human_logger_output_structure() -> None:
         log = get_logger("human-test")
         log.info("saludo_human", usuario="juan")
     txt = cap.text
-    # Al menos el evento debe estar
     assert "saludo_human" in txt
-    # level info debe aparecer
     assert "info" in txt.lower()
-    # logger name human-test
     assert "human-test" in txt or "human_test" in txt
-
-
-# ---------------------------------------------------------------------------
-# Tests: JSON renderer -> una linea por evento con campos obligatorios
-# ---------------------------------------------------------------------------
 
 
 def test_json_renderer_one_line_structured() -> None:
@@ -138,12 +97,10 @@ def test_json_renderer_one_line_structured() -> None:
     with cap:
         log = get_logger("json-test")
         log.info("evento_json", clave_1="valor_1", numero=42)
-    # Parsear ultima linea valida
     txt = cap.text.strip() or ""
     lines = [ln for ln in txt.splitlines() if ln.strip()]
     assert lines, f"Expected JSON output lines, got: {txt!r}"
     parsed = None
-    # Iterar de atras a adelante; el primero que parsea OK es el bueno
     for ln in reversed(lines):
         try:
             parsed = json.loads(ln)
@@ -151,22 +108,15 @@ def test_json_renderer_one_line_structured() -> None:
         except json.JSONDecodeError:
             continue
     assert parsed is not None, f"Could not parse JSON from: {lines}"
-    # Campos obligatorios
     assert "event" in parsed
     assert "level" in parsed
     assert "timestamp" in parsed
     assert "phase" in parsed
     assert "version" in parsed
-    # Valores
     assert parsed["event"] == "evento_json"
     assert parsed.get("clave_1") == "valor_1"
     assert parsed.get("numero") == 42
-    assert parsed.get("logger") in {"json-test", None} or True  # campo logger es normal
-
-
-# ---------------------------------------------------------------------------
-# Tests: bind_context / unbind_context / reset_context
-# ---------------------------------------------------------------------------
+    assert parsed.get("logger") in {"json-test", None} or True
 
 
 def test_bind_context_appears_in_events() -> None:
@@ -190,14 +140,7 @@ def test_unbind_context_removes_key() -> None:
         log = get_logger("ctx-test2")
         log.info("hola")
     txt = cap.text
-    # job_id queda, phase se fue
     assert "job-002" in txt
-    # "beta" no debe aparecer como valor (puede aparecer en "beta" de otro campo si,
-    # pero la variable phase fue removida)
-    # Para ser preciso, parseamos structlog context despues de unbind:
-    # No necesitamos comprobar que NUNCA aparezca la cadena beta; solo que el key
-    # phase fue desvinculado. Lo comprobamos via dicts internos de
-    # structlog.contextvars.
     from structlog.contextvars import get_contextvars
     ctx = get_contextvars()
     assert "phase" not in ctx
@@ -208,11 +151,6 @@ def test_reset_context_clears_all() -> None:
     reset_context()
     from structlog.contextvars import get_contextvars
     assert get_contextvars() == {}
-
-
-# ---------------------------------------------------------------------------
-# Tests: NUNCA imprimir secretos (HF_TOKEN / SecretStr / password)
-# ---------------------------------------------------------------------------
 
 
 def test_redact_secrets_processor_redacts_hf_token_key() -> None:
@@ -238,11 +176,8 @@ def test_redact_secrets_processor_password_key_hint() -> None:
 
 
 def test_logger_never_prints_secretstr_hf_token_in_json() -> None:
-    # Recrear setup JSON, bind hf_token como str (key filtrada) y SecretStr
-    # Paso 1: llamar setup_logging con JSON para que genere el ProcessorFormatter
     setup_logging(level="INFO", fmt="json", env="production")
     root = logging.getLogger()
-    # Capturar formatter del primer handler (creado por setup_logging con fmt=json)
     formatter: Any = None
     for h in root.handlers:
         if getattr(h, "formatter", None) is not None:
@@ -281,10 +216,8 @@ def test_logger_never_prints_secretstr_hf_token_in_json() -> None:
         except json.JSONDecodeError:
             continue
     assert last is not None, f"No JSON found: {buffer.getvalue()}"
-    # El value real NO debe aparecer en todo el payload serializado
     raw_payload = json.dumps(last)
     assert "hf_REAL_TOKEN_AABBCCDD_12345" not in raw_payload
     assert "otro-valor-secreto" not in raw_payload
     assert "admin123" not in raw_payload
-    # En cambio deben aparecer los sentinelas
     assert "REDACTED" in raw_payload or "HIDDEN_SECRET" in raw_payload

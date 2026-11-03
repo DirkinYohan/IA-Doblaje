@@ -1,7 +1,3 @@
-"""Ports abstractos Metrics Aggregation Step 12 — Capa DOMAIN.
-
-Clean Architecture. Domain NO usa IA. Solo ABC.
-"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -19,8 +15,6 @@ from app.domain.value_objects.metrics import RuntimeMetricsSnapshot
 
 
 class MetricsAggregationPort(ABC):
-    """Puerto abstracto Metrics Aggregation. Application depende solo de esto."""
-
     @abstractmethod
     def aggregate(
         self,
@@ -37,10 +31,6 @@ class MetricsAggregationPort(ABC):
         metrics_enabled: bool = True,
         logger: Any | None = None,
     ) -> MetricsResult:
-        """Agregar métricas desde entidades upstream + snapshot de runtime.
-
-        metrics_enabled=False → MetricsResult deshabilitado (sin inventar métricas).
-        """
         raise NotImplementedError  # pragma: no cover
 
 

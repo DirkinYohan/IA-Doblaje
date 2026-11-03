@@ -1,7 +1,3 @@
-"""Tests unitarios Value Objects VAD T04 Step 04.
-
-Domain VO. Sin torch/silero/soundfile. pydantic only.
-"""
 from __future__ import annotations
 
 import re
@@ -63,7 +59,6 @@ def test_voice_interval_valid_ok() -> None:
 
 
 def test_voice_interval_duration_autocorrect_wrong() -> None:
-    # duration_ms != end-start → autocorrect single-source
     vi = VoiceInterval(
         start_ms=100, end_ms=250, max_confidence=0.8, duration_ms=9999, sample_count=1
     )

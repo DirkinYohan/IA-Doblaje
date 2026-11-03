@@ -1,23 +1,3 @@
-"""Subtítulos progresivos generados desde el ARCHIVO, por delante del cabezal.
-
-Un único proceso por proyecto (``LiveRunner``) genera TODOS los subtítulos del
-vídeo: arranca en cuanto termina la subida, sigue aunque nadie lo esté viendo y
-termina cuando el vídeo entero está transcrito y traducido a cada idioma. El
-trabajo «Producir» y cada reproductor abierto se ENGANCHAN a ese mismo proceso:
-nunca hay dos transcribiendo el mismo vídeo.
-
-* Prioridad: el hueco más cercano a la posición de quien está mirando, en el
-  idioma que está mirando. Sin espectadores, de principio a fin.
-* Después de lo prioritario se completa el resto: el original entero y cada
-  idioma de destino (una traducción que falla no bloquea las demás).
-* Cada lote se persiste y se publica con un número de secuencia. Un cliente
-  que se conecta (o reconecta) recibe primero una instantánea completa: no se
-  pierde nada aunque los primeros eventos salieran antes de conectarse.
-* Whisper y el traductor se cargan una vez por proceso y se comparten.
-
-Contrato de tiempos: milisegundos enteros sobre la línea temporal del vídeo.
-Identificador estable de un segmento: ``{idioma}:{inicio}:{fin}``.
-"""
 from __future__ import annotations
 
 import json
@@ -34,21 +14,12 @@ from app.application.use_cases.progressive_transcription import ProgressiveTrans
 
 log = logging.getLogger("ia.live")
 
-# Hasta dónde se adelanta el trabajo prioritario respecto al cabezal.
 LOOKAHEAD_MS = 120_000
-# Ventana de audio por pasada de Whisper. Su coste en CPU apenas depende de la
-# longitud (rellena hasta 30 s), así que ventanas largas rinden más.
 WINDOW_MS = 24_000
-# Ventana junto al cabezal: alguien está esperando a ese subtítulo.
 NEAR_WINDOW_MS = 12_000
-# Un segmento que toca el borde de una ventana puede estar cortado: se repite
-# desde su inicio en la siguiente pasada.
 EDGE_MS = 400
-# Al empezar en mitad de un hueco se retrocede un poco para no cortar palabras.
 BACKOFF_MS = 1_500
-# Tramo máximo que se traduce de una vez (varias frases: contexto suficiente).
 TRANSLATE_CHUNK_MS = 30_000
-# Pasadas fallidas seguidas antes de dar el procesamiento por fallido.
 MAX_FAILURES = 3
 
 
@@ -57,8 +28,6 @@ def segment_id(language: str, start_ms: int, end_ms: int) -> str:
 
 
 class Ranges:
-    """Conjunto de intervalos [inicio, fin) ya procesados, fusionados y ordenados."""
-
     def __init__(self) -> None:
         self.items: list[tuple[int, int]] = []
 
@@ -83,12 +52,10 @@ class Ranges:
         return any(a <= t < b for a, b in self.items)
 
     def end_before(self, t: int) -> int:
-        """Fin del último intervalo que termina en o antes de `t` (0 si no hay)."""
         ends = [b for _a, b in self.items if b <= t]
         return max(ends, default=0)
 
     def first_gap(self, lo: int, hi: int) -> tuple[int, int] | None:
-        """Primer hueco dentro de [lo, hi), o None si está todo cubierto."""
         cursor = lo
         for a, b in self.items:
             if b <= cursor:
@@ -101,7 +68,6 @@ class Ranges:
         return (cursor, hi) if cursor < hi else None
 
     def prefix_end(self) -> int:
-        """Hasta dónde está cubierto de forma CONTINUA desde 0."""
         if self.items and self.items[0][0] <= 0:
             return self.items[0][1]
         return 0
@@ -115,8 +81,6 @@ class Ranges:
 
 @dataclass
 class LiveCallbacks:
-    """Dependencias inyectadas (modelos y salida): permiten probar sin modelos."""
-
     read: Callable[[int, int], Any]
     transcribe: Callable[[Any, int, str | None], list[Any]]
     translate: Callable[[list[str], str, str], list[str]]
@@ -126,8 +90,6 @@ class LiveCallbacks:
 
 
 class LiveSubtitler:
-    """Genera las pistas del vídeo priorizando lo que se está viendo."""
-
     def __init__(
         self,
         *,
@@ -142,7 +104,6 @@ class LiveSubtitler:
         self.source = source_language if source_language not in {"", "und"} else ""
         self.duration_ms = int(duration_ms)
         self.sample_rate = sample_rate
-        # Idiomas a completar además del original (en el orden pedido).
         self.targets = [t for t in (targets or []) if t]
         self.cues: dict[str, list[dict[str, Any]]] = {}
         self.covered: dict[str, Ranges] = {}
@@ -155,15 +116,12 @@ class LiveSubtitler:
             ranges.add(0, int(covered_ms))
             self.covered[language] = ranges
         self._cond = threading.Condition()
-        # Protege `cues`/`covered` frente a las instantáneas pedidas desde otros hilos.
         self.data_lock = threading.RLock()
         self._position = 0
         self._language = ""
         self._stopped = False
-        # Idiomas cuya traducción falló: no se reintentan en bucle.
         self.failed: set[str] = set()
 
-    # --- Control (desde otros hilos) ----------------------------------------
     def set_position(self, time_ms: int, language: str | None = None) -> None:
         with self._cond:
             self._position = max(0, min(int(time_ms), self.duration_ms))
@@ -194,8 +152,6 @@ class LiveSubtitler:
                 failures += 1
                 log.warning("live: error en una pasada (%d/%d): %s", failures, MAX_FAILURES, exc)
                 if failures >= MAX_FAILURES:
-                    # Sin reintentos infinitos: p. ej. el vídeo ya no se puede
-                    # leer. El job se marca FAILED con la causa.
                     raise
                 self.cb.emit({"type": "error", "message": str(exc)})
                 worked = False
@@ -206,7 +162,6 @@ class LiveSubtitler:
                     if not self._stopped:
                         self._cond.wait(timeout=1.0)
 
-    # --- Estado ---------------------------------------------------------------
     def languages(self) -> list[str]:
         return [self.source] + [t for t in self.targets if t != self.source] if self.source else []
 
@@ -223,7 +178,6 @@ class LiveSubtitler:
         return True
 
     def progress(self) -> int:
-        """Porcentaje del trabajo total (original + cada idioma de destino)."""
         languages = self.languages()
         if not languages or self.duration_ms <= 0:
             return 0
@@ -241,9 +195,7 @@ class LiveSubtitler:
                 "complete": self.is_complete(),
             }
 
-    # --- Una unidad de trabajo --------------------------------------------
     def step(self) -> bool:
-        """Procesa el hueco más urgente. False si no queda nada pendiente."""
         with self._cond:
             position, language = self._position, self._language
         if not self.source:
@@ -252,11 +204,9 @@ class LiveSubtitler:
                 return False
         language = language or next((t for t in self.targets if t != self.source), self.source)
 
-        # 1) Lo que se está viendo: por delante del cabezal, en su idioma.
         horizon = min(self.duration_ms, position + LOOKAHEAD_MS)
         if self._work_between(position, horizon, language, near=True):
             return True
-        # 2) El resto del vídeo: original y cada idioma, el que se ve primero.
         ordered = [language] + [t for t in self.targets if t != language]
         for start in (position, 0):
             if self._work_between(start, self.duration_ms, None, near=False):
@@ -301,12 +251,9 @@ class LiveSubtitler:
         ranges = self._ranges(self.source)
         start = gap_start
         if start == position and not ranges.contains(position - 1):
-            # Se empieza en mitad de un hueco: un poco antes, para no cortar
-            # la palabra que suena justo en la posición del salto.
             start = max(ranges.end_before(position), position - BACKOFF_MS, 0)
         size = NEAR_WINDOW_MS if near and start <= position + 1_000 else WINDOW_MS
         end = min(gap_end, start + size, self.duration_ms)
-        # El borde es "blando" si no lo marca lo ya procesado ni el final.
         soft_edge = end == start + size and end < self.duration_ms and end < gap_end
 
         audio = self.cb.read(start, end)
@@ -321,7 +268,6 @@ class LiveSubtitler:
 
         covered_until = end
         if soft_edge and len(rows) > 1 and rows[-1][1] >= end - EDGE_MS:
-            # Probablemente cortado por la ventana: se repite desde su inicio.
             covered_until = max(start + 1, rows.pop()[0])
 
         cues = build_cues(rows, language=self.source, limits=CueLimits(), state="final")
@@ -346,8 +292,6 @@ class LiveSubtitler:
         target = self._ranges(language)
         source_cues = self.cues.get(self.source, [])
         start = gap_start
-        # Un cue del original que ya estaba sonando en el inicio del hueco
-        # también hay que traducirlo, o ese instante quedaría sin texto.
         for cue in source_cues:
             cue_start, cue_end = int(cue["start_ms"]), int(cue["end_ms"])
             if cue_start < start < cue_end and not target.contains(cue_start):
@@ -389,14 +333,10 @@ class LiveSubtitler:
         self.cb.persist(language, persisted, prefix)
 
 
-# --- Un proceso por proyecto -----------------------------------------------
-
 Listener = Callable[[dict[str, Any]], None]
 
 
 class LiveRunner:
-    """Hilo que genera los subtítulos de UN proyecto y reparte sus eventos."""
-
     def __init__(self, project_id: str, build: Callable[["LiveRunner"], LiveSubtitler]) -> None:
         self.project_id = project_id
         self._build = build
@@ -410,8 +350,6 @@ class LiveRunner:
         self.job_id: str | None = None
         self.tracker: JobTracker | None = None
         self.on_progress: Callable[["LiveRunner"], None] | None = None
-        # Se construye en su propio hilo (abrir el vídeo puede tardar): hasta
-        # entonces la posición pedida se guarda y se aplica al empezar.
         self.subtitler: LiveSubtitler | None = None
         self.error = ""
         self._pending_position: tuple[int, str | None] = (0, None)
@@ -428,7 +366,6 @@ class LiveRunner:
         if subtitler is not None:
             subtitler.set_position(int(time_ms), language)
 
-    # Eventos ---------------------------------------------------------------
     def emit(self, event: dict[str, Any]) -> None:
         self._mark_first(event)
         with self._lock:
@@ -449,7 +386,6 @@ class LiveRunner:
             self.on_progress(self)
 
     def attach(self, listener: Listener) -> tuple[dict[str, Any], Callable[[], None]]:
-        """Suscribe y devuelve la instantánea actual (con su secuencia)."""
         with self._lock:
             key = self._next_listener
             self._next_listener += 1
@@ -473,7 +409,6 @@ class LiveRunner:
         with self._lock:
             return len(self._listeners)
 
-    # Ciclo de vida -----------------------------------------------------------
     def start(self) -> None:
         threading.Thread(target=self._run, name=f"live-{self.project_id[:8]}", daemon=True).start()
 
@@ -512,7 +447,6 @@ class LiveRunner:
             self.subtitler.stop()
 
     def _mark_first(self, event: dict[str, Any]) -> None:
-        """Instrumentación: primera vez que ocurre cada etapa (sin contenido)."""
         if event.get("type") != "cues":
             return
         key = f"first_cues_{event.get('language')}"
@@ -540,7 +474,6 @@ def ensure_runner(
     *,
     job: tuple[Any, str] | None = None,
 ) -> tuple[LiveRunner, bool]:
-    """El proceso del proyecto: el que ya existe o uno nuevo. (runner, creado)."""
     with _RUNNERS_LOCK:
         current = _RUNNERS.get(project_id)
         if current is not None and not current.done.is_set():
@@ -554,7 +487,6 @@ def ensure_runner(
 
 
 def stop_all() -> None:
-    """Pruebas y apagado: detiene todos los procesos en curso."""
     with _RUNNERS_LOCK:
         runners = list(_RUNNERS.values())
         _RUNNERS.clear()
@@ -562,19 +494,11 @@ def stop_all() -> None:
         runner.stop()
 
 
-# --- Construcción con la base de datos y el vídeo reales ---------------------
-
-
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def media_source(project: Any) -> Any:
-    """Dónde leer el vídeo ORIGINAL sin descargarlo entero.
-
-    La copia local si existe (recién subido o almacenamiento local); si el
-    vídeo está en Storage, su URL firmada: FFmpeg lee por rangos de ella.
-    """
     from app.core.config import get_settings
     from app.presentation.api import media_store
 
@@ -591,11 +515,6 @@ def media_source(project: Any) -> Any:
 
 
 def open_reader(project: Any) -> Any:
-    """Lector de audio por tramos del ORIGINAL, sin descargarlo entero.
-
-    El primer tramo está disponible en segundos y no tras la descarga
-    completa (ver `media_source`).
-    """
     from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
     from app.infrastructure.audio.ffmpeg_segment_reader import FFmpegSegmentReader
 
@@ -636,13 +555,6 @@ def load_existing(conn: Any, project_id: str) -> dict[str, tuple[list[dict[str, 
 
 
 class JobTracker:
-    """Refleja el proceso de un proyecto en su job: estado, etapas y progreso.
-
-    Mismo contrato que el pipeline anterior: historial de etapas (PREPARING,
-    EXTRACTING_AUDIO, una CUES_READY por lote del original…) con porcentaje que
-    nunca retrocede, `last_cue_ms` y eventos `processing_progress` en el bus.
-    """
-
     def __init__(self, conn: Any, job_id: str) -> None:
         self.conn = conn
         self.job_id = job_id
@@ -703,7 +615,6 @@ class JobTracker:
 
 
 def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> LiveRunner:
-    """Arranca (o recupera) el proceso de un proyecto con los modelos reales."""
     from app.presentation.api import db
 
     project_id = str(project["id"])
@@ -775,7 +686,6 @@ def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> 
         runner.attach_job(conn, job_id)
     if created:
         log.info("live[%s]: proceso creado (job=%s)", project_id[:8], (job_id or "-")[:8])
-        # Los modelos se cargan en paralelo con la primera lectura del audio.
         source = str(project["source_language"] or "")
         threading.Thread(
             target=warm, kwargs={"translation": any(t != source for t in targets)},
@@ -783,8 +693,6 @@ def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> 
         ).start()
     return runner
 
-
-# --- Modelos compartidos por todo el proceso --------------------------------
 
 _asr_lock = threading.Lock()
 _translate_lock = threading.Lock()
@@ -805,12 +713,6 @@ def _asr() -> Any:
 
 
 def _translator() -> Callable[[list[str], str, str], list[str]]:
-    """Traductor por lotes: CTranslate2 si el modelo convertido existe.
-
-    CTranslate2 (el motor de Whisper) carga M2M100 en ~1,5 s y traduce unas
-    cuatro veces más rápido que PyTorch en CPU. Sin el modelo convertido se usa
-    el adaptador PyTorch de siempre.
-    """
     with _translate_lock:
         if "mt" not in _holder:
             from app.infrastructure.translation import m2m100_ct2_adapter
@@ -827,7 +729,7 @@ def _translator() -> Callable[[list[str], str, str], list[str]]:
                 )
 
                 adapter = M2M100TranslatorAdapter(settings_getter=get_settings)
-                adapter._get_engine()  # carga los pesos (caché de módulo compartida)
+                adapter._get_engine()
 
                 def _pytorch(texts: list[str], source: str, target: str) -> list[str]:
                     return adapter.translate_batch(
@@ -873,7 +775,6 @@ def model_translate(texts: list[str], source: str, target: str) -> list[str]:
 
 
 def warm(*, translation: bool) -> None:
-    """Carga los modelos antes de que se necesiten."""
     try:
         _asr()
         if translation:

@@ -1,8 +1,3 @@
-"""Tests unitarios T14 Application RunTempCleanupUseCase.
-
-No requiere filesystem (Fake port). Cubre políticas cleanup_enabled/keep_temp_files,
-force_save, idempotencia, errores de seguridad y determinismo.
-"""
 from __future__ import annotations
 
 import ast
@@ -34,11 +29,6 @@ def _run(cleanup, temp_root="/tmp", job_id="job-12345678", cleanup_enabled=True,
     return RunTempCleanupUseCase(cleanup=cleanup).run(
         temp_root, job_id, cleanup_enabled=cleanup_enabled, keep_temp_files=keep_temp_files, force_save=force_save
     )
-
-
-# =============================================================================
-# Políticas
-# =============================================================================
 
 
 class TestPolicies:
@@ -86,7 +76,6 @@ class TestForceSave:
         assert r2.cleaned is True
 
     def test_force_save_equivalence(self):
-        # Mismo comportamiento con force_save True y False
         c1 = _FakeCleanup(removed=("job-12345678",))
         c2 = _FakeCleanup(removed=("job-12345678",))
         r1 = _run(c1, force_save=True)
@@ -140,7 +129,6 @@ class TestNoMutation:
         c = _FakeCleanup(removed=("job-12345678",))
         r = _run(c)
         assert isinstance(r, TempCleanupResult)
-        # el port no muta los argumentos pasados
         assert c.last_args == ("/tmp", "job-12345678")
 
 
@@ -193,11 +181,6 @@ class TestASTAudit:
                         imports.add(node.module.split(".")[0])
             forbidden = {"torch", "pyannote", "numpy", "speechbrain", "huggingface_hub", "requests", "urllib", "httpx", "subprocess"}
             assert not (imports & forbidden), f"{p} importa prohibido: {imports & forbidden}"
-
-
-# =============================================================================
-# Cobertura adicional
-# =============================================================================
 
 
 class TestPoliciesAdditional:

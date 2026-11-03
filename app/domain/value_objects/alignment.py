@@ -1,7 +1,3 @@
-"""Value Objects Alignment Step 09 — ASR ↔ Speaker Alignment. Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (sin IA).
-"""
 from __future__ import annotations
 
 import math
@@ -15,11 +11,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.functional_validators import BeforeValidator
-
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_ms_ge_zero(v: object) -> int:
@@ -72,22 +63,7 @@ AlignmentStrategyName = Literal[
 ]
 
 
-# ---------------------------------------------------------------------------
-# 2) DialogueSegment (segmento ASR alineado a un speaker)
-# ---------------------------------------------------------------------------
-
-
 class DialogueSegment(BaseModel):
-    """Segmento de diálogo: timestamp oficial T07 + texto ASR T06 + speaker T08.
-
-    Garantías:
-      - segment_index >= 0
-      - start_ms < end_ms
-      - duration_ms == end_ms - start_ms (recomputado)
-      - speaker_label válido (SPEAKER_NN)
-      - alignment_confidence en [0,1]
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     segment_index: AlignmentSegmentIndex = Field(..., description="Índice 0-based contiguo.")
@@ -136,21 +112,7 @@ class DialogueSegment(BaseModel):
         return self.duration_ms / 1000.0
 
 
-# ---------------------------------------------------------------------------
-# 3) AlignmentThresholds (configuración centralizada T09)
-# ---------------------------------------------------------------------------
-
-
 class AlignmentThresholds(BaseModel):
-    """Configuración T09. Defaults estrictos.
-
-    min_overlap_ms          = 1        (overlap > 0 requerido; se usa > 0)
-    allow_silent_fallback   = True
-    strict_validity         = True
-    max_segments_safety     = 1000000
-    max_speakers_safety     = 100
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     min_overlap_ms: int = Field(

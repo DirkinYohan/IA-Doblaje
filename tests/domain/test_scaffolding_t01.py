@@ -1,11 +1,3 @@
-"""Tests unitarios T01: estructura del proyecto y metadatos.
-
-Estos tests garantizan que el scaffolding T01 sea correcto:
-    - imports sin dependencias circulares
-    - versiones exportadas correctamente
-    - Estructura de carpetas completa
-"""
-
 from __future__ import annotations
 
 import importlib
@@ -15,9 +7,6 @@ from pathlib import Path
 import pytest
 
 
-# -----------------------------------------------------------------------------
-# 1. PACKAGE IMPORTS (sin circular)
-# -----------------------------------------------------------------------------
 _PACKAGE_PATHS: list[tuple[str, str]] = [
     ("app", "app"),
     ("app.core", "app/core"),
@@ -46,7 +35,6 @@ _PACKAGE_PATHS: list[tuple[str, str]] = [
 
 @pytest.mark.parametrize(("module_name", "_"), _PACKAGE_PATHS, ids=[m for m, _ in _PACKAGE_PATHS])
 def test_module_import_without_circular_dependency(module_name: str, _: str) -> None:
-    """Cada modulo debe importarse sin lanzar ImportError circular."""
     try:
         importlib.import_module(module_name)
     except Exception as exc:  # noqa: BLE001
@@ -54,23 +42,18 @@ def test_module_import_without_circular_dependency(module_name: str, _: str) -> 
 
 
 def test_app_metadata_exports() -> None:
-    """Metadatos basicos del paquete app deben ser no-vacios y correctos."""
     import app
 
     assert isinstance(app.__version__, str) and app.__version__ != ""
-    assert app.__version__.count(".") == 2  # SemVer: X.Y.Z
+    assert app.__version__.count(".") == 2
     assert isinstance(app.__title__, str) and len(app.__title__) > 3
     assert "Fase 1" in app.__phase__
     assert app.__status__ == "in-development"
 
 
-# -----------------------------------------------------------------------------
-# 2. CONSTANTS INTEGRITY
-# -----------------------------------------------------------------------------
 class TestCoreConstants:
     @staticmethod
     def test_pipeline_steps_15_exact() -> None:
-        """PUNTO 9 + T15: exactamente 15 pasos ordenados 1..15."""
         from app.core.constants import PipelineStep
 
         values = sorted(step.value for step in PipelineStep)
@@ -87,7 +70,6 @@ class TestCoreConstants:
 
     @staticmethod
     def test_quality_profiles_three_levels() -> None:
-        """PUNTO 6: exactamente 3 perfiles."""
         from app.core.constants import QualityProfile
 
         profile_names = {p.value for p in QualityProfile}
@@ -105,7 +87,6 @@ class TestCoreConstants:
         assert MediaFormat.WAV in SUPPORTED_MEDIA_FORMATS
         assert ".mp4" in SUPPORTED_MEDIA_EXTENSIONS
         assert ".wav" in SUPPORTED_MEDIA_EXTENSIONS
-        # Asegurar que no se acepta por ejemplo .exe
         assert ".exe" not in SUPPORTED_MEDIA_EXTENSIONS
 
     @staticmethod
@@ -118,27 +99,21 @@ class TestCoreConstants:
 
     @staticmethod
     def test_speaker_label_regex_pattern() -> None:
-        """PUNTO 3: labels SPEAKER_NN. Validar pattern."""
         import re
         from app.core.constants import SPEAKER_LABEL_REGEX
 
         regex = re.compile(SPEAKER_LABEL_REGEX)
         assert regex.match("SPEAKER_00") is not None
         assert regex.match("SPEAKER_99") is not None
-        # Casos INVALIDOS
-        assert regex.match("SPEAKER_0") is None  # Falta padding
-        assert regex.match("Luke") is None       # Nombre personaje (Fase 5+)
-        assert regex.match("speaker_00") is None # Case sensitive
-        assert regex.match("SPEAKER_100") is None # Fuera de rango index
+        assert regex.match("SPEAKER_0") is None
+        assert regex.match("Luke") is None
+        assert regex.match("speaker_00") is None
+        assert regex.match("SPEAKER_100") is None
 
 
-# -----------------------------------------------------------------------------
-# 3. EXCEPTIONS HIERARCHY
-# -----------------------------------------------------------------------------
 class TestExceptionsHierarchy:
     @staticmethod
     def test_profile_downgrade_required_exception_payload() -> None:
-        """PUNTO 2: Excepcion especial para el downgrade no-silencioso."""
         from app.core.exceptions import ProfileDowngradeRequired
 
         exc = ProfileDowngradeRequired(
@@ -169,9 +144,6 @@ class TestExceptionsHierarchy:
             )
 
 
-# -----------------------------------------------------------------------------
-# 4. ESTRUCTURA DE CARPETAS
-# -----------------------------------------------------------------------------
 _EXPECTED_DIRS: list[str] = [
     "app/core",
     "app/domain/entities",

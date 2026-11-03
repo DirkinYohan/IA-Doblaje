@@ -1,7 +1,3 @@
-"""Tests unitarios T13 — Domain Value Objects y Entity Output.
-
-Solo DOMAIN, sin filesystem/IA. Pydantic + patrón DUT.
-"""
 from __future__ import annotations
 
 import copy
@@ -34,11 +30,6 @@ def _result(**kw):
     return StructuredJsonOutputResult(**base)
 
 
-# =============================================================================
-# OutputFileRecord
-# =============================================================================
-
-
 class TestOutputFileRecord:
     def test_valid(self):
         r = _record()
@@ -67,11 +58,6 @@ class TestOutputFileRecord:
             OutputFileRecord(filename="analysis.json", sha256=_SHA, x=1)  # type: ignore[call-arg]
 
 
-# =============================================================================
-# StructuredJsonOutputResult
-# =============================================================================
-
-
 class TestStructuredJsonOutputResult:
     def test_valid(self):
         r = _result()
@@ -85,7 +71,7 @@ class TestStructuredJsonOutputResult:
 
     def test_file_sha_missing_raises(self):
         with pytest.raises(ValidationError):
-            _result(file_sha256={"analysis.json": _SHA})  # falta transcript
+            _result(file_sha256={"analysis.json": _SHA})
 
     def test_file_sha_extra_raises(self):
         with pytest.raises(ValidationError):

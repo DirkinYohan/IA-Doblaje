@@ -1,11 +1,3 @@
-"""Entidad DiarizationResult Step 08 — Capa DOMAIN.
-
-Frozen + extra=forbid. Chain of custody via:
-  PreprocessedAudio.sha256 == VadResult.source_preprocessed_sha256
-  == DiarizationResult.source_preprocessed_sha256
-
-Sin dependencias infraestructura (no torch/pyannote/speechbrain/numpy).
-"""
 from __future__ import annotations
 
 from typing import Literal
@@ -42,11 +34,6 @@ MODEL_LABEL_PYANNOTE_DIARIZATION_V1_LITERAL: Literal[
 
 
 class DiarizationResult(BaseModel):
-    """Resultado Step 08 Speaker Diarization. Inmutable. Chain of Custody.
-
-    No almacena: bytes, tensores, audio, transcripciones, objetos pyannote/torch.
-    """
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -54,7 +41,6 @@ class DiarizationResult(BaseModel):
         protected_namespaces=(),
     )
 
-    # ---- Chain of Custody T03 → T04 → T08 -------------------------------
     source_preprocessed_sha256: Sha256Hash = Field(
         ..., description="Enlace T03 → T08. Debe coincidir con PreprocessedAudio.sha256."
     )
@@ -62,19 +48,16 @@ class DiarizationResult(BaseModel):
         ..., description="Enlace T04 → T08. Debe coincidir con VadResult.source_preprocessed_sha256."
     )
 
-    # ---- Metadata T03 passthrough ---------------------------------------
     total_duration_ms: DiarizationMs = Field(
         ..., description="Duración total del audio (ms) = PreprocessedAudio.duration_sec*1000."
     )
 
-    # ---- Outputs --------------------------------------------------------
     speaker_turns: tuple[SpeakerTurn, ...] = Field(
         default_factory=tuple, description="Turnos ASC, sin overlaps, dentro de [0, total]."
     )
     num_speakers: int = Field(0, ge=0, description="Número de speakers distintos.")
     num_turns: int = Field(0, ge=0, description="Número total de turnos.")
 
-    # ---- Estrategia / modelo -------------------------------------------
     strategy: DIARIZATION_STRATEGIES_TYPE = Field(
         DIARIZATION_STRATEGY_PYANNOTE,
         description="'pyannote_speaker_diarization_v1' o 'diarization_silent_fallback'.",
@@ -84,16 +67,12 @@ class DiarizationResult(BaseModel):
         description="Etiqueta fija del modelo aplicado (pipeline local v3.1).",
     )
 
-    # ---- Job / auditoría ------------------------------------------------
     job_id: str | None = Field(default=None, min_length=8, max_length=128)
     analysis_metadata: dict[str, object] = Field(
         default_factory=dict,
         description="Solo metadata auditoría. Sin bytes/tensores/audio/objetos pyannote.",
     )
 
-    # =====================================================================
-    # VALIDADORES
-    # =====================================================================
 
     @field_validator("source_preprocessed_sha256", "vad_reference_sha256")
     @classmethod
@@ -119,19 +98,16 @@ class DiarizationResult(BaseModel):
 
     @model_validator(mode="after")
     def _validate_all(self) -> "DiarizationResult":
-        # (A) Chain of custody: source == vad
         if self.source_preprocessed_sha256 != self.vad_reference_sha256:
             raise ValueError(
                 "Chain of Custody rota T08: source_preprocessed_sha256 != vad_reference_sha256."
             )
 
-        # (B) num consistency
         if self.num_turns != len(self.speaker_turns):
             raise ValueError(
                 f"num_turns={self.num_turns} != len(speaker_turns)={len(self.speaker_turns)}"
             )
 
-        # (C) num_speakers consistency: labels únicos
         labels = {str(t.speaker_label) for t in self.speaker_turns}
         if self.num_speakers != len(labels):
             raise ValueError(
@@ -139,7 +115,6 @@ class DiarizationResult(BaseModel):
                 f"({sorted(labels)})"
             )
 
-        # (D) Orden ASC + sin overlaps + dentro de [0, total]
         prev_end: int = -1
         for i, t in enumerate(self.speaker_turns):
             if int(t.start_ms) < 0:
@@ -154,7 +129,6 @@ class DiarizationResult(BaseModel):
                 )
             prev_end = int(t.end_ms)
 
-        # (E) Silent fallback consistency
         if self.strategy == DIARIZATION_STRATEGY_SILENT_FALLBACK:
             if len(self.speaker_turns) != 0:
                 raise ValueError(

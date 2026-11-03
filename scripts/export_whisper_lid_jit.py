@@ -1,62 +1,3 @@
-"""Exportar el modelo LID T05 a TorchScript JIT — RECONSTRUCCIÓN (RUTA B).
-
-Este script NO entrena y NO descarga datasets. Reconstruye un modelo
-funcionalmente compatible con el contrato de
-`WhisperEncoderLanguageDetectionAdapter` usando únicamente los pesos
-OFICIALES MIT de `openai/whisper-small`.
-
-----------------------------------------------------------------------
-CONTRATO QUE DEBE CUMPLIR (adapter T05)
-----------------------------------------------------------------------
-    forward(audio, sr) -> logits [B, 99]
-      audio : torch.Tensor float32, shape [1, N], rango [-1, 1]
-      sr    : int = 16000
-      logits: torch.Tensor shape [1, 99] (99 clases de idioma, orden
-              EXACTO del proyecto WHISPER_MULTILINGUAL_LANGUAGES)
-
-Propiedades exigidas:
-    - TorchScript JIT (torch.jit.load)
-    - PyTorch 2.4.1+cpu
-    - 100% offline tras la exportación (sin HF, sin red)
-    - tamaño > 100 MB (guard del loader)
-
-----------------------------------------------------------------------
-ORIGEN EXACTO DE PESOS
-----------------------------------------------------------------------
-    - Checkpoint: openai/whisper-small  ("small.pt", 461 MB)
-      URL oficial: https://openaipublic.azureedge.net/main/whisper/models/
-                   9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt
-    - Descargado con openai-whisper 20250625 (whisper.load_model('small'))
-    - Código: openai/whisper (MIT)
-    - Pesos: MIT
-
-----------------------------------------------------------------------
-ARQUITECTURA (reconstrucción)
-----------------------------------------------------------------------
-    audio [1, N]  (float32, [-1,1])
-        -> pad/trim a 480000 muestras (30 s)   [1, 480000]
-        -> log-mel spectrogram 80 mels          [1, 80, 3000]
-              (hann 400, hop 160, clamp 1e-10, log10,
-               recorte -8 dB, escalado (x+4)/4)  == whisper.audio
-        -> Whisper Small ENCODER                 [1, 1500, 768]
-              (d_model=768, 12 capas, 12 cabezas, d_model=768)
-        -> mean pooling temporal                 [1, 768]
-        -> proyección lineal SIN bias:
-              logits = pooled @ W_lang.T         [1, 99]
-              W_lang[0:98] = decoder.token_embedding.weight[lang_token_ids]
-                              (embeddings oficiales de los 98 language tokens)
-              W_lang[98]   = logit muy negativo (clase sentinel 'und')
-
-NOTA DE HONESTIDAD:
-    Este artefacto es una RECONSTRUCCIÓN funcionalmente compatible. NO es
-    idéntico al "whisper_encoder_small_multilingual_lid_v1.jit" original
-    (irrecuperable). Usa el encoder oficial y los embeddings oficiales de
-    los language tokens del checkpoint MIT; la única decisión de diseño
-    propia es el mean-pooling + proyección lineal sobre dichos embeddings
-    (fiel a la descripción "Whisper encoder -> probabilidades multiclase"
-    de docs/PIPELINE.md).
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -69,19 +10,15 @@ from pathlib import Path
 import torch  # noqa: F401 — usado en forward de _WhisperLidInner
 import torch.nn as nn  # noqa: F401 — usado por _WhisperLidInner/_WhisperLidOuter (nivel módulo)
 
-# ---------------------------------------------------------------------------
-# CONSTANTES (fijas, igual que whisper.audio y docs/PIPELINE.md)
-# ---------------------------------------------------------------------------
 N_FFT = 400
 HOP_LENGTH = 160
 N_MELS = 80
-N_SAMPLES = 480000  # 30 s @ 16 kHz
+N_SAMPLES = 480000
 SAMPLE_RATE = 16000
-N_AUDIO_CTX = 1500  # frames del encoder
+N_AUDIO_CTX = 1500
 D_MODEL = 768
 NUM_CLASSES = 99
 
-# Mapa del proyecto (orden EXACTO): índice -> ISO code. Índice 98 = sentinel 'und'.
 PROJECT_LANG_CODES: tuple[str, ...] = (
     "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr",
     "pl", "ca", "nl", "ar", "sv", "it", "id", "hi", "fi", "vi",
@@ -110,7 +47,7 @@ def _pad_or_trim(audio: "torch.Tensor", length: int = N_SAMPLES) -> "torch.Tenso
     import torch.nn.functional as F
 
     if audio.dim() == 1:
-        audio = audio.unsqueeze(0)  # [1, N]
+        audio = audio.unsqueeze(0)
     n = audio.shape[1]
     if n > length:
         audio = audio[:, :length]
@@ -133,15 +70,6 @@ def _log_mel(audio: "torch.Tensor", filters: "torch.Tensor") -> "torch.Tensor":
 
 
 class _WhisperLidInner(nn.Module):
-    """Módulo interno (solo entrada tensorial) — se exporta por trace.
-
-    Mecanismo LID REAL de Whisper (idéntico a `Whisper.detect_language`):
-        audio -> mel -> ENCODER (audio features)
-        logits = DECODER(token startoftranscript, audio_features)[:, 0]
-        language_logits = logits[index language tokens] -> [98]
-        + sentinel 'und' -> [99]
-    """
-
     def __init__(
         self,
         encoder,
@@ -153,30 +81,22 @@ class _WhisperLidInner(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        # buffers persistentes -> quedan dentro del JIT
-        self.register_buffer("sot_token", torch.tensor([[sot_token]], dtype=torch.long))  # [1, 1]
-        self.register_buffer("lang_token_ids", lang_token_ids.detach().clone().to(torch.long))  # [98]
-        self.register_buffer("mel_filters", mel_filters.detach().clone())  # [80, 201]
+        self.register_buffer("sot_token", torch.tensor([[sot_token]], dtype=torch.long))
+        self.register_buffer("lang_token_ids", lang_token_ids.detach().clone().to(torch.long))
+        self.register_buffer("mel_filters", mel_filters.detach().clone())
 
     def forward(self, audio: torch.Tensor) -> torch.Tensor:
-        audio = _pad_or_trim(audio, N_SAMPLES)  # [1, 480000]
-        mel = _log_mel(audio, self.mel_filters)  # [1, 80, 3000]
-        feats = self.encoder(mel)  # [1, 1500, 768]
-        # Un paso del decoder sobre el token startoftranscript (cross-attention)
-        logits = self.decoder(self.sot_token, feats)[:, 0]  # [1, n_vocab]
-        lang_logits = logits[0].index_select(0, self.lang_token_ids)  # [98]
-        lang_logits = lang_logits.unsqueeze(0)  # [1, 98]
-        # Clase 98 (sentinel 'und'): logit constante muy negativo (nunca argmax).
+        audio = _pad_or_trim(audio, N_SAMPLES)
+        mel = _log_mel(audio, self.mel_filters)
+        feats = self.encoder(mel)
+        logits = self.decoder(self.sot_token, feats)[:, 0]
+        lang_logits = logits[0].index_select(0, self.lang_token_ids)
+        lang_logits = lang_logits.unsqueeze(0)
         sentinel = torch.full_like(lang_logits[:, :1], float(SENTINEL_LOGIT))
-        return torch.cat([lang_logits, sentinel], dim=1)  # [1, 99]
+        return torch.cat([lang_logits, sentinel], dim=1)
 
 
 class _WhisperLidOuter(nn.Module):
-    """Módulo externo scripted: firma forward(audio, sr) exigida por el adapter.
-
-    `sr` se conserva por compatibilidad de firma; el modelo opera a 16 kHz fijo.
-    """
-
     def __init__(self, inner: "torch.nn.Module") -> None:
         super().__init__()
         self.inner = inner
@@ -221,9 +141,6 @@ def main() -> int:
     import whisper
     from whisper.tokenizer import get_encoding
 
-    # Desactivar SDPA durante la exportación: `scaled_dot_product_attention`
-    # con `is_causal=mask is not None` se vuelve Tensor al hacer trace y falla.
-    # Forzar la ruta manual de atención (matemáticamente equivalente).
     from whisper import model as _wm
 
     _wm.MultiHeadAttention.use_sdpa = False
@@ -235,23 +152,21 @@ def main() -> int:
     print(f"[2/7] Extrayendo language token IDs (orden exacto del proyecto)")
 
     encoding = get_encoding(name="multilingual", num_languages=99)
-    # token ID por CÓDIGO (fiel al orden del proyecto; evita el desfase por 'lt')
     lang_token_ids: list[int] = []
     for code in PROJECT_LANG_CODES:
         tok = f"<|{code}|>"
         tid = encoding.encode_single_token(tok)
         lang_token_ids.append(tid)
     assert len(lang_token_ids) == NUM_CLASSES - 1, "debe haber 98 language tokens"
-    lang_ids_tensor = torch.tensor(lang_token_ids, dtype=torch.long)  # [98]
+    lang_ids_tensor = torch.tensor(lang_token_ids, dtype=torch.long)
 
-    # Token startoftranscript (inicio del prompt LID, igual que detect_language)
     sot_token: int = int(encoding.encode_single_token("<|startoftranscript|>"))
     print(f"      sot_token={sot_token}, lang_tokens={len(lang_token_ids)}")
 
     print("[3/7] Obteniendo filtros mel oficiales")
     from whisper.audio import mel_filters as _mel_filters
 
-    mel_filters = _mel_filters(torch.device("cpu"), N_MELS).detach().clone()  # [80, 201]
+    mel_filters = _mel_filters(torch.device("cpu"), N_MELS).detach().clone()
 
     print("[4/7] Construyendo wrapper y exportando TorchScript (trace + script)")
     import torch.nn as nn
@@ -267,17 +182,15 @@ def main() -> int:
     for p in inner.parameters():
         p.requires_grad_(False)
 
-    example_audio = torch.randn(1, SAMPLE_RATE * 3, dtype=torch.float32)  # 3 s
+    example_audio = torch.randn(1, SAMPLE_RATE * 3, dtype=torch.float32)
     with torch.inference_mode():
         traced_inner = torch.jit.trace(inner, example_audio, check_trace=False)
 
-    # Envolver en módulo scripted con firma forward(audio, sr)
     outer = _WhisperLidOuter(traced_inner)
     outer.eval()
     with torch.inference_mode():
         scripted = torch.jit.script(outer)
 
-    # optimización de inferencia
     scripted = torch.jit.freeze(scripted)
     scripted.save(str(out_path))
     print(f"      Exportado: {out_path}")
@@ -295,7 +208,6 @@ def main() -> int:
     assert not bool((out_np != out_np).any()), "contiene NaN"
     assert not bool((abs(out_np) == float("inf")).any()), "contiene Inf"
 
-    # softmax valida y top-k
     logits = out_np[0]
     logits_stable = logits - float(logits.max())
     exp = __import__("numpy").exp(logits_stable)

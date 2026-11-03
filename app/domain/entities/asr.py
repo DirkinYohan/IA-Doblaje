@@ -31,8 +31,6 @@ from app.domain.value_objects.lid import LidDurationMs
 
 
 class ASRWord(BaseModel):
-    """Palabra con tiempo. Opcional: solo si el decoder devolvió word timestamps."""
-
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
 
     text: str = Field(..., max_length=500)
@@ -50,8 +48,6 @@ class ASRWord(BaseModel):
 
 
 class ASRSegment(BaseModel):
-    """Segmento ASR raw de decoder Step 06 (NO son timestamps oficiales T07)."""
-
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
 
     segment_index: ASRSegmentIndex = Field(
@@ -111,11 +107,8 @@ class ASRSegment(BaseModel):
 
 
 class ASRResult(BaseModel):
-    """Entity frozen Step 06 ASR. Chain of custody 4-sha triple binding."""
-
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
 
-    # --- CHAIN OF CUSTODY 4-SHA ------------------------------------------
     source_preprocessed_sha256: Sha256Hash = Field(
         ...,
         description="Sha256Hash PreprocessedAudio T03. == VadResult.source_preprocessed_sha256 == LanguageDetectionResult.source_preprocessed_sha256.",
@@ -127,13 +120,11 @@ class ASRResult(BaseModel):
         ..., description="== LanguageDetectionResult.source_preprocessed_sha256 (chain binding T05)."
     )
 
-    # --- AUDIO METADATA PASSTHROUGH T03 -----------------------------------
     sample_rate: _SampleRateVO
     channels: _ChannelsVO
     bit_depth: BitDepth
     total_duration_ms: LidDurationMs
 
-    # --- CORE ASR T06 ----------------------------------------------------
     transcript_text: ASRText
     transcript_language_code: str = Field(
         ...,
@@ -152,7 +143,6 @@ class ASRResult(BaseModel):
     )
     num_segments: ASRSegmentIndex
 
-    # --- METADATA INFERENCIA ---------------------------------------------
     strategy: ASRStrategyName
     model_label: str = Field(
         ...,
@@ -162,16 +152,12 @@ class ASRResult(BaseModel):
     )
     thresholds_used: AsrThresholds
 
-    # --- CUSTODY / JOB ---------------------------------------------------
     job_id: str | None = Field(default=None, min_length=8, max_length=128)
     analysis_metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Sólo metadata auditoría. NO arrays/tensores/audio/logits completos.",
     )
 
-    # =====================================================================
-    # VALIDADORES
-    # =====================================================================
     @field_validator("segments")
     @classmethod
     def _segments_ordered_and_limited(
@@ -190,8 +176,6 @@ class ASRResult(BaseModel):
                 and seg.start_ms is not None
                 and seg.start_ms < prev_end
             ):
-                # Solapamiento moderado permitido, pero >15% duración warning
-                # (no impedir, Whisper decoder produce solapes naturales).
                 pass
             if seg.end_ms is not None:
                 prev_end = seg.end_ms
@@ -213,7 +197,6 @@ class ASRResult(BaseModel):
 
     @model_validator(mode="after")
     def _chain_of_custody_and_consistency(self) -> "ASRResult":
-        # 1) Chain 4-sha
         if (
             self.source_preprocessed_sha256 != self.vad_reference_sha256
             or self.source_preprocessed_sha256 != self.lid_reference_sha256
@@ -222,12 +205,10 @@ class ASRResult(BaseModel):
                 "Chain of custody SHA256 roto: source_preprocessed_sha256 "
                 "== vad_reference_sha256 == lid_reference_sha256."
             )
-        # 2) num_segments consistency
         if self.num_segments != len(self.segments):
             raise ValueError(
                 f"num_segments={self.num_segments} != len(segments)={len(self.segments)}"
             )
-        # 3) silent fallback consistency
         if self.strategy == "asr_silent_fallback":
             if self.transcript_text != "":
                 raise ValueError("asr_silent_fallback requiere transcript_text=''")
@@ -237,17 +218,10 @@ class ASRResult(BaseModel):
                 raise ValueError("asr_silent_fallback requiere num_segments=0")
             if self.confidence != 0.0:
                 raise ValueError("asr_silent_fallback requiere confidence=0.0")
-        # 4) confidence when segments present
         if len(self.segments) > 0 and self.confidence < 0.0:
             raise ValueError("confidence < 0 con segments presentes")
-        # 5) NO validar end_ms vs total_duration_ms: start_ms/end_ms son metadata cruda del decoder T06
-        #    (timestamps oficiales pertenecen a T07). Permitir que FW devuelva offsets que excedan duration.
-        # 6) transcript_text vacío pero segments no vacíos: permitido (caso límite Whisper <|nospeech|>)
         return self
 
-    # =====================================================================
-    # BUILDER HELPER (chain of custody desde entidades anteriores)
-    # =====================================================================
     @classmethod
     def build_chain(
         cls,

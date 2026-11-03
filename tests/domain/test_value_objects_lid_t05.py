@@ -1,7 +1,3 @@
-"""Tests unitarios T05 — Domain Value Objects LID.
-
-Solo DOMAIN, sin torch/transformers/infrastructure. pydantic + _Dut pattern T04.
-"""
 from __future__ import annotations
 
 import copy
@@ -20,7 +16,6 @@ from app.domain.value_objects.lid import (
 )
 
 
-# DUTs para Annotated VOs (igual que T04 pattern)
 class _CodeDut(BaseModel):
     v: LanguageCode
 
@@ -38,11 +33,6 @@ _VALID_CODES = [
     "pl", "ca", "nl", "ar", "sv", "it", "id", "hi", "fi", "vi",
     "haw", "und", "su", "jw", "ba", "tt", "as", "mg", "tl",
 ]
-
-
-# =============================================================================
-# 1) LanguageCode
-# =============================================================================
 
 
 class TestLanguageCode:
@@ -77,11 +67,6 @@ class TestLanguageCode:
             _CodeDut(v=bad_bcp)
 
 
-# =============================================================================
-# 2) LanguageConfidence
-# =============================================================================
-
-
 class TestLanguageConfidence:
     @pytest.mark.parametrize("x", [0.0, 0.25, 0.5, 0.99, 1.0])
     def test_valid_0_1_ok(self, x: float):
@@ -108,11 +93,6 @@ class TestLanguageConfidence:
             _ConfDut(v="0.5")
 
 
-# =============================================================================
-# 3) LidDurationMs
-# =============================================================================
-
-
 class TestLidDurationMs:
     def test_ge0_ok(self):
         assert _DurDut(v=0).v == 0
@@ -125,11 +105,6 @@ class TestLidDurationMs:
     def test_nonint_raises_type(self):
         with pytest.raises((ValidationError, TypeError)):
             _DurDut(v="100")
-
-
-# =============================================================================
-# 4) LanguageAlternative
-# =============================================================================
 
 
 class TestLanguageAlternative:
@@ -192,11 +167,6 @@ class TestLanguageAlternative:
         a2 = self._ok()
         assert a1 == a2
         assert a1.model_dump_json() == a2.model_dump_json()
-
-
-# =============================================================================
-# 5) LanguageDetectionThresholds
-# =============================================================================
 
 
 class TestLanguageDetectionThresholds:
@@ -265,11 +235,6 @@ class TestLanguageDetectionThresholds:
         assert LanguageDetectionThresholds() == LanguageDetectionThresholds()
 
 
-# =============================================================================
-# 6) validate_alternatives_sorted_desc
-# =============================================================================
-
-
 class TestValidateAlternatives:
     @staticmethod
     def _alt(code: str, name: str, conf: float, rank: int) -> LanguageAlternative:
@@ -312,8 +277,6 @@ class TestValidateAlternatives:
             validate_alternatives_sorted_desc(alts, 3)
 
     def test_topk_exceed_raises(self):
-        # Usar códigos ISO válidos. rank ≤3 en Field, así que 4 items con ranks 1,2,3,1;
-        # validate_alternatives_sorted_desc primero detecta len>top_k antes que duplicate rank.
         alts = (
             self._alt("en", "English", 0.5, 1),
             self._alt("es", "Spanish", 0.3, 2),
@@ -322,11 +285,6 @@ class TestValidateAlternatives:
         )
         with pytest.raises(ValueError):
             validate_alternatives_sorted_desc(alts, 3)
-
-
-# =============================================================================
-# 7) VO globales: sin imports infraestructura
-# =============================================================================
 
 
 def test_todos_los_vo_no_tienen_dependencias_infraestructura():

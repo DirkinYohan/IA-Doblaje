@@ -1,7 +1,3 @@
-"""Tests unitarios T15 — Application RunTranslationUseCase.
-
-Sin modelo real. Usa fake translator + fake writer + adaptación real (pura).
-"""
 from __future__ import annotations
 
 import json
@@ -148,7 +144,7 @@ class TestSourceEqualsTarget:
         uc = _make_uc(translator)
         res = uc.run(segments_path=str(segs), transcript_path=str(tr),
                      output_directory=str(out), target_language="es")
-        assert translator.counter == 0  # no se ejecuta M2M100
+        assert translator.counter == 0
         assert res.segments[0].translated_text == "Hello world"
         assert res.segments[0].adapted_text == "Hello world"
         assert res.validation.translation_performed is False
@@ -200,7 +196,7 @@ class TestSegmentos:
         uc = _make_uc()
         res = uc.run(segments_path=str(segs), transcript_path=str(tr),
                      output_directory=str(out), target_language="es")
-        assert res.segments[0].adapted_text  # no vacío
+        assert res.segments[0].adapted_text
 
 
 class TestValidacion:
@@ -220,8 +216,6 @@ class TestValidacion:
         assert any("translated_text vacío" in e for e in res.validation.errors)
 
     def test_no_1a1_genera_error(self, tmp_path):
-        # segments.json con segment_index discontinuo (1, 2) — el UseCase produce
-        # 2 salidas con índices [1,2] que TranslationResult rechaza (continuidad)
         segs_path = tmp_path / "segments.json"
         tr_path = tmp_path / "transcript.json"
         segs_path.write_text(json.dumps({
@@ -303,7 +297,6 @@ class TestOutputDoc:
 class TestWarnings:
     def test_warnings_se_conservan(self, tmp_path):
         segs, tr, out = _setup(tmp_path, ["hello"])
-        # traducción larga para forzar warning de duración
         class _LongTranslator(_FakeTranslator):
             def translate(self, **kw):
                 return "X" * 200
@@ -334,14 +327,13 @@ class TestCadena:
 
 class TestAmpliado:
     def test_traduce_con_contexto_sin_fusionar(self, tmp_path):
-        # 1 entrada -> 1 salida, aunque haya contexto
         segs, tr, out = _setup(tmp_path, ["one", "two"])
         translator = _FakeTranslator()
         uc = _make_uc(translator)
         res = uc.run(segments_path=str(segs), transcript_path=str(tr),
                      output_directory=str(out), target_language="es")
         assert len(res.segments) == 2
-        assert translator.counter == 2  # una llamada por segmento
+        assert translator.counter == 2
 
     def test_source_explicito_override_transcript(self, tmp_path):
         segs, tr, out = _setup(tmp_path, ["hi"], lang="en")
@@ -370,7 +362,6 @@ class TestAmpliado:
         uc = _make_uc()
         res = uc.run(segments_path=str(segs), transcript_path=str(tr),
                      output_directory=str(out), target_language="es")
-        # adapted != vacío y es el texto que se usará para doblaje
         assert res.segments[0].adapted_text
         assert res.segments[0].adapted_text == res.segments[0].translated_text or True
 
@@ -393,7 +384,6 @@ class TestAmpliado:
         assert writer.written["translation.json"]["schema_version"] == "9.9.9"
 
     def test_adaptacion_no_rompe_si_translated_vacio(self, tmp_path):
-        # translator devuelve vacío para texto vacío -> adapted queda vacío (ok)
         segs, tr, out = _setup(tmp_path, [""])
         uc = _make_uc()
         res = uc.run(segments_path=str(segs), transcript_path=str(tr),

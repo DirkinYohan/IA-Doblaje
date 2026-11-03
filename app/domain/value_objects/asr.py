@@ -72,8 +72,6 @@ AsrMaxDurationMinutes = Annotated[int, BeforeValidator(_validate_minutes_positiv
 
 
 class AsrThresholds(BaseModel):
-    """Thresholds configurables ASR T06 (Step 06)."""
-
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     min_transcript_confidence: TranscriptConfidence = Field(

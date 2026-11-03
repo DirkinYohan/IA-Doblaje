@@ -1,20 +1,3 @@
-"""Correo saliente: confirmación de cuenta y recuperación de contraseña.
-
-* Con `BREVO_API_KEY` se envía por la API HTTP de Brevo (puerto 443). Es lo
-  que funciona en Render: su plan gratuito bloquea el SMTP saliente.
-* Sin clave (desarrollo y pruebas) el correo se guarda en `IA_MAIL_DIR`: un
-  `.txt` con el destinatario, el enlace y el token, y el `.html` para verlo.
-
-El envío va en un hilo aparte: la petición del usuario no espera a Brevo y un
-fallo del proveedor no rompe el registro (queda en el log y se puede
-reenviar).
-
-Variables:
-    BREVO_API_KEY       clave de API de Brevo (xkeysib-…)
-    MAIL_FROM_EMAIL     remitente; debe estar VERIFICADO en Brevo
-    MAIL_FROM_NAME      nombre del remitente (por defecto «IA Doblaje»)
-    APP_PUBLIC_URL      URL pública del frontend, para los enlaces
-"""
 from __future__ import annotations
 
 import html
@@ -38,7 +21,6 @@ class Mail:
     subject: str
     html: str
     text: str
-    # Para el modo archivo y los logs; nunca se envían como tales.
     kind: str
     link: str
     token: str
@@ -50,8 +32,6 @@ class Mailer(Protocol):
 
 
 class FileMailer:
-    """Desarrollo: deja el correo en disco en vez de enviarlo."""
-
     def __init__(self, folder: Path) -> None:
         self.folder = Path(folder)
 
@@ -70,8 +50,6 @@ class FileMailer:
 
 
 class BrevoMailer:
-    """Envío real por la API transaccional de Brevo."""
-
     def __init__(self, api_key: str, sender_email: str, sender_name: str, *, url: str = BREVO_URL) -> None:
         self.api_key = api_key
         self.sender_email = sender_email
@@ -96,8 +74,6 @@ class BrevoMailer:
             timeout=20,
         )
         if response.status_code >= 300:
-            # El cuerpo de Brevo explica el motivo (remitente no verificado,
-            # clave inválida…); la clave nunca se registra.
             raise RuntimeError(f"Brevo respondió {response.status_code}: {response.text[:300]}")
         log.info("correo (%s) enviado a %s por Brevo", mail.kind, mail.to)
 
@@ -127,8 +103,6 @@ def send_in_background(mailer: Mailer, mail: Mail) -> threading.Thread:
     thread.start()
     return thread
 
-
-# --- Plantillas ------------------------------------------------------------
 
 _TEXTS = {
     "verify": {
@@ -177,7 +151,6 @@ def locale_of(value: object) -> str:
 
 
 def compose(kind: str, *, to: str, name: str, link: str, token: str, expires: str, locale: str = "es") -> Mail:
-    """Correo listo para enviar: HTML con estilos en línea y su versión en texto."""
     lang = locale_of(locale)
     copy = _TEXTS[kind][lang]
     first = (name or "").split(" ")[0] or to
@@ -215,4 +188,3 @@ __all__ = [
     "BrevoMailer", "FileMailer", "Mail", "Mailer", "compose", "from_env", "locale_of",
     "public_url", "send_in_background",
 ]
-

@@ -1,4 +1,3 @@
-"""Tests de la cola de trabajos: historial de etapas y recuperación tras reinicio."""
 from __future__ import annotations
 
 import json
@@ -47,7 +46,6 @@ class TestMigrate:
         assert "stage_history" in job_cols
 
     def test_migracion_es_idempotente(self, conn: sqlite3.Connection) -> None:
-        """Ejecutar migrate() de nuevo no debe fallar ni duplicar columnas."""
         db.migrate(conn)
         db.migrate(conn)
         names = [r["name"] for r in conn.execute("PRAGMA table_info(projects)")]
@@ -63,7 +61,6 @@ class TestReconcileOrphans:
         self, conn: sqlite3.Connection, status: str, monkeypatch
     ) -> None:
         _seed(conn, "job-1", status)
-        # No se arranca el hilo real; se comprueba la reconciliación de estado.
         monkeypatch.setattr(worker, "enqueue", lambda _conn, job_id: None)
         result = worker.reconcile_orphans(conn)
         assert result["requeued"] == 1

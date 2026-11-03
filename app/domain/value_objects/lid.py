@@ -1,7 +1,3 @@
-"""Value Objects LID Step 05 — Language ID Detection. Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (no torch/transformers/soundfile).
-"""
 from __future__ import annotations
 
 from typing import Annotated, Optional
@@ -14,11 +10,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.functional_validators import BeforeValidator
-
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_duration_ms_ge_zero(v: object) -> int:
@@ -88,14 +79,7 @@ def _validate_language_code(v: object) -> str:
 LanguageCode = Annotated[str, BeforeValidator(_validate_language_code)]
 
 
-# ---------------------------------------------------------------------------
-# 2) LanguageAlternative (Top-3 alternatives; rank 1 = primary ya incluido).
-# ---------------------------------------------------------------------------
-
-
 class LanguageAlternative(BaseModel):
-    """Alternativa de idioma detectada. Frozen + extra forbid."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     language_code: LanguageCode = Field(..., description="ISO 639-1 lowercase (o 639-3 si rare).")
@@ -112,21 +96,7 @@ class LanguageAlternative(BaseModel):
         return s
 
 
-# ---------------------------------------------------------------------------
-# 3) LanguageDetectionThresholds (configuración centralizada T05).
-#    NO tocar ProcessingConfig.
-# ---------------------------------------------------------------------------
-
-
 class LanguageDetectionThresholds(BaseModel):
-    """Configuración LID centralizada. Defaults oficiales PIPELINE.md + user rules.
-
-    min_confidence             = 0.4  (PIPELINE.md Umbral mínimo)
-    top_k                      = 3    (PIPELINE.md Top-3 alternativas)
-    min_speech_ratio_to_analyze = 0.01 (al menos 1% speech para analizar)
-    default_language_override  = None (fallback user-specified si < threshold strict=False)
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     min_confidence: LanguageConfidence = Field(
@@ -158,15 +128,9 @@ class LanguageDetectionThresholds(BaseModel):
         return x
 
 
-# ---------------------------------------------------------------------------
-# 4) Helpers validación de alternatives (usados desde Entity).
-# ---------------------------------------------------------------------------
-
-
 def validate_alternatives_sorted_desc(
     alternatives: tuple[LanguageAlternative, ...], top_k: int
 ) -> tuple[LanguageAlternative, ...]:
-    """Validar y normalizar alternatives: len<=top_k, order DESC confidence, rank consecutivos."""
     if len(alternatives) > top_k:
         raise ValueError(
             f"alternatives length {len(alternatives)} > top_k={top_k}"

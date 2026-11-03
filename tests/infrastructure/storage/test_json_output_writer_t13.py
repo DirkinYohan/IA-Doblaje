@@ -1,7 +1,3 @@
-"""Tests unitarios T13 Infrastructure — JsonOutputWriter.
-
-Usa filesystem temporal (tmp_path). allow_nan=False, SHA256, OutputWriteError.
-"""
 from __future__ import annotations
 
 import ast
@@ -18,11 +14,6 @@ from app.infrastructure.storage.json_output_writer import JsonOutputWriter
 @pytest.fixture
 def writer():
     return JsonOutputWriter()
-
-
-# =============================================================================
-# JsonOutputWriter
-# =============================================================================
 
 
 class TestJsonOutputWriter:
@@ -90,7 +81,6 @@ class TestJsonOutputWriter:
         assert sha1 == sha2
 
     def test_write_error_raises_output_write_error(self, writer, tmp_path):
-        # directorio que no se puede crear (archivo existente en el path)
         blocker = tmp_path / "blocker"
         blocker.write_text("no dir")
         with pytest.raises(OutputWriteError):
@@ -154,6 +144,5 @@ class TestASTAudit:
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     imports.add(node.module.split(".")[0])
-        # Solo stdlib + app.*
         stdlib_ok = {"hashlib", "json", "pathlib", "typing", "app", "__future__"}
         assert imports <= stdlib_ok, f"imports no stdlib: {imports - stdlib_ok}"

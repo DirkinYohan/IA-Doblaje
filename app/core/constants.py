@@ -1,46 +1,19 @@
-"""Constantes globales del proyecto.
-
-Enums y valores inmutables compartidos por todas las capas.
-
-IMPORTANTE: No importar dependencias pesadas (torch/etc.) aqui.
-            Solo stdlib + typing.
-"""
-
 from __future__ import annotations
 
 from enum import Enum, IntEnum
 from typing import FrozenSet, Literal
 
 
-# =============================================================================
-# VERSIONADO
-# =============================================================================
 ENGINE_VERSION: str = "0.1.0"
 PIPELINE_VERSION: int = 1
 JSON_SCHEMA_VERSION: str = "0.1.0"
 PYPROJECT_MIN_PYTHON: tuple[int, int] = (3, 11)
 PYPROJECT_MAX_PYTHON: tuple[int, int] = (3, 12)
 
-# =============================================================================
-# CALIDAD / PERFILES DE PROCESAMIENTO (PUNTO 6)
-# =============================================================================
 QualityProfileName = Literal["quality", "balanced", "performance"]
 
 
 class QualityProfile(str, Enum):
-    """Perfil de procesamiento.
-
-    +----------------------+------------------+-------------------+--------------------+
-    | Perfil               | Adapter ASR      | Modelo            | VRAM aproximada    |
-    +======================+==================+===================+====================+
-    | QUALITY              | Whisper-PyTorch  | large-v3 FP16     | 8 GB               |
-    +----------------------+------------------+-------------------+--------------------+
-    | BALANCED             | Whisper-PyTorch  | medium FP16       | 5 GB               |
-    +----------------------+------------------+-------------------+--------------------+
-    | PERFORMANCE          | Faster-Whisper   | large-v3 int8     | 3 GB               |
-    +----------------------+------------------+-------------------+--------------------+
-    """
-
     QUALITY = "quality"
     BALANCED = "balanced"
     PERFORMANCE = "performance"
@@ -55,9 +28,6 @@ class QualityProfile(str, Enum):
         return None
 
 
-# =============================================================================
-# DEVICE / DISPOSITIVOS
-# =============================================================================
 DeviceTypeName = Literal["auto", "cpu", "cuda", "mps"]
 
 
@@ -65,16 +35,13 @@ class DeviceType(str, Enum):
     AUTO = "auto"
     CPU = "cpu"
     CUDA = "cuda"
-    MPS = "mps"  # Apple Silicon
+    MPS = "mps"
 
     @property
     def is_accelerator(self) -> bool:
         return self in (DeviceType.CUDA, DeviceType.MPS)
 
 
-# =============================================================================
-# FORMATOS / MEDIA
-# =============================================================================
 class MediaFormat(str, Enum):
     MP4 = "mp4"
     MKV = "mkv"
@@ -102,21 +69,13 @@ SUPPORTED_MEDIA_EXTENSIONS: FrozenSet[str] = frozenset(
     f".{fmt.value}" for fmt in SUPPORTED_MEDIA_FORMATS
 )
 
-# =============================================================================
-# AUDIO PRESETS (targets de normalizacion)
-# =============================================================================
 DEFAULT_SAMPLE_RATE_HZ: int = 16_000
 DEFAULT_CHANNELS: int = 1
 DEFAULT_BIT_DEPTH: int = 16
 DEFAULT_AUDIO_FORMAT: str = "wav"
 DEFAULT_AUDIO_CODEC: str = "pcm_s16le"
 
-# =============================================================================
-# PIPELINE STEPS - 14 pasos (PUNTO 9 del diseño actualizado)
-# =============================================================================
 class PipelineStep(IntEnum):
-    """Orden de ejecucion del pipeline AnalyzeAudioUseCase."""
-
     MEDIA_VALIDATION = 1
     AUDIO_EXTRACTION = 2
     AUDIO_PREPROCESSING = 3
@@ -178,9 +137,6 @@ _STEP_EMOJI: dict[PipelineStep, str] = {
     PipelineStep.TRANSLATION: "🌐",
 }
 
-# =============================================================================
-# QUALITY ANALYSIS - NIVELES
-# =============================================================================
 QualityLevelName = Literal["passed", "warning", "failed"]
 
 
@@ -191,13 +147,9 @@ class QualityLevel(str, Enum):
 
     @property
     def blocking(self) -> bool:
-        """Si el nivel debe abortar el save en modo estricto."""
         return self is QualityLevel.FAILED
 
 
-# =============================================================================
-# RESULT STATUS DE UN STEP
-# =============================================================================
 class StepStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -206,9 +158,6 @@ class StepStatus(str, Enum):
     FAILED = "failed"
 
 
-# =============================================================================
-# FILES OUTPUT (5 archivos)
-# =============================================================================
 OUTPUT_FILES_DEFAULT: tuple[str, ...] = (
     "analysis",
     "transcript",
@@ -217,10 +166,6 @@ OUTPUT_FILES_DEFAULT: tuple[str, ...] = (
     "metadata",
 )
 
-# =============================================================================
-# SPEAKER DIARIZATION (PUNTO 3)
-# =============================================================================
-# Pattern estricto del label para Fase 1: SOLO SPEAKER_NN
 SPEAKER_LABEL_REGEX: str = r"^SPEAKER_[0-9]{2}$"
 SPEAKER_LABEL_MIN_INDEX: int = 0
 SPEAKER_LABEL_MAX_INDEX: int = 99

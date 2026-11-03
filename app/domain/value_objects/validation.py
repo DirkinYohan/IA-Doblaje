@@ -1,7 +1,3 @@
-"""Value Objects Validation Step 11 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (sin IA).
-"""
 from __future__ import annotations
 
 import math
@@ -15,11 +11,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.functional_validators import BeforeValidator
-
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_score_0_1(v: object) -> float:
@@ -63,14 +54,7 @@ ValidationCheckCode = Literal[
 ValidationCheckOutcome = Literal["passed", "warning", "error"]
 
 
-# ---------------------------------------------------------------------------
-# 2) ValidationCheckResult (resultado individual de un check)
-# ---------------------------------------------------------------------------
-
-
 class ValidationCheckResult(BaseModel):
-    """Resultado individual de un check VC01..VC11."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     check_code: ValidationCheckCode = Field(..., description="Código VC01..VC11.")
@@ -83,17 +67,7 @@ class ValidationCheckResult(BaseModel):
         return str(v or "")
 
 
-# ---------------------------------------------------------------------------
-# 3) ValidationThresholds (configuración centralizada T11)
-# ---------------------------------------------------------------------------
-
-
 class ValidationThresholds(BaseModel):
-    """Umbrales de validación T11.
-
-    strict_quality: si True y quality_level == failed → aborta salvo force_save.
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     strict_quality: bool = Field(

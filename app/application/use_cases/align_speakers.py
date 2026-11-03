@@ -1,8 +1,3 @@
-"""UseCase RunSpeakerAlignmentUseCase — Capa APPLICATION (T09 Step 09 Alignment).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO importa torch/pyannote/numpy/speechbrain (clean architecture).
-"""
 from __future__ import annotations
 
 import time
@@ -31,16 +26,6 @@ log = get_logger("app.application.use_cases.align_speakers")
 
 @dataclass(frozen=True, slots=True)
 class RunSpeakerAlignmentUseCase:
-    """Orquesta Step 09 ASR ↔ Speaker Alignment. Inmutable.
-
-    Input: (TimestampGenerationResult, ASRResult, DiarizationResult) — frozen, NO mutados.
-    Output: AlignmentResult frozen con chain of custody 6-SHA.
-    """
-
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
-
     def run(
         self,
         timestamps: TimestampGenerationResult,
@@ -50,7 +35,6 @@ class RunSpeakerAlignmentUseCase:
         thresholds: AlignmentThresholds | None = None,
         job_id: str | None = None,
     ) -> AlignmentResult:
-        # 1) None inputs
         if timestamps is None:
             raise ValidationFailedError("RunSpeakerAlignmentUseCase: timestamps es None")
         if asr_result is None:
@@ -61,7 +45,6 @@ class RunSpeakerAlignmentUseCase:
         bind_context(job_id=job_id, phase="ALIGNMENT", model=MODEL_LABEL_ALIGNMENT_V1_LITERAL)
         t0 = time.perf_counter()
 
-        # 2) Thresholds defaults
         effective_thresholds: AlignmentThresholds
         if thresholds is None:
             effective_thresholds = AlignmentThresholds()
@@ -72,10 +55,8 @@ class RunSpeakerAlignmentUseCase:
                 )
             effective_thresholds = thresholds
 
-        # 3) Chain of Custody T03→T07→T08
         self._validate_chain(timestamps, diarization)
 
-        # 4) Safety: max segments
         if int(timestamps.num_segments_ts) > int(effective_thresholds.max_segments_safety):
             raise ValidationFailedError(
                 f"T09 safety: num_segments={timestamps.num_segments_ts} > "
@@ -90,7 +71,6 @@ class RunSpeakerAlignmentUseCase:
             },
         )
 
-        # 5) Diarización vacía → silent fallback
         if int(diarization.num_speakers) == 0 or len(diarization.speaker_turns) == 0:
             if not effective_thresholds.allow_silent_fallback:
                 raise ValidationFailedError(
@@ -102,7 +82,6 @@ class RunSpeakerAlignmentUseCase:
                 job_id=job_id,
             )
 
-        # 6) Alineación segmento a segmento
         dialogue_segments: list[DialogueSegment] = []
         num_unassigned = 0
         asr_segments = list(asr_result.segments)
@@ -110,7 +89,6 @@ class RunSpeakerAlignmentUseCase:
 
         for ts_seg in timestamps.segments:
             idx = int(ts_seg.segment_index)
-            # Texto desde ASR T06 (no desde TimestampedSegment)
             asr_seg = asr_by_index.get(idx)
             if asr_seg is None:
                 raise ValidationFailedError(
@@ -126,13 +104,10 @@ class RunSpeakerAlignmentUseCase:
             )
 
             if speaker is None:
-                # Caso B: segmento sin overlap → no alineado
                 num_unassigned += 1
                 continue
 
             label, alignment_conf = speaker
-            # segment_index debe ser CONTIGUO 0-based dentro del resultado
-            # alineado (contrato AlignmentResult), no el índice original T07.
             dialogue_segments.append(
                 DialogueSegment(
                     segment_index=len(dialogue_segments),
@@ -146,7 +121,6 @@ class RunSpeakerAlignmentUseCase:
                 )
             )
 
-        # 7) Post-condiciones
         total_segments = int(timestamps.num_segments_ts)
         if len(dialogue_segments) + num_unassigned != total_segments:
             raise ValidationFailedError(
@@ -170,7 +144,6 @@ class RunSpeakerAlignmentUseCase:
             num_unassigned=num_unassigned,
         )
 
-        # 8) strict validity
         if effective_thresholds.strict_validity and not result.strict_ok:
             raise ValidationFailedError(
                 f"T09 strict_validity=True con strict_ok=False; "
@@ -190,9 +163,6 @@ class RunSpeakerAlignmentUseCase:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # HELPERS INTERNOS
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _validate_chain(
@@ -206,8 +176,6 @@ class RunSpeakerAlignmentUseCase:
                 "Chain of Custody rota T07↔T08: TimestampGenerationResult.sha != "
                 "DiarizationResult.source_preprocessed_sha256."
             )
-        # T07 internamente ya valida sus 4 primeras referencias; aquí confirmamos
-        # coherencia de las que T09 re-expone.
         for name in ("vad_reference_sha256", "lid_reference_sha256", "asr_reference_sha256"):
             if str(getattr(timestamps, name)).lower() != ts_source:
                 raise ValidationFailedError(
@@ -222,12 +190,6 @@ class RunSpeakerAlignmentUseCase:
         turns: tuple,
         min_overlap_ms: int,
     ) -> tuple[str, float] | None:
-        """Weighted Overlap Majority Vote por speaker.
-
-        Retorna (speaker_label, alignment_confidence) del ganador, o None si no hay
-        candidato con overlap > 0.
-        """
-        # Agrupar score ponderado por speaker (suma de weighted_score de sus turns)
         weighted_by_speaker: dict[str, float] = {}
         best_confidence_by_speaker: dict[str, float] = {}
         earliest_start_by_speaker: dict[str, int] = {}
@@ -254,7 +216,6 @@ class RunSpeakerAlignmentUseCase:
         if not weighted_by_speaker:
             return None
 
-        # Determinista: mayor weighted_score, luego mayor confidence, luego menor start_ms
         winner = max(
             weighted_by_speaker,
             key=lambda label: (
@@ -264,7 +225,6 @@ class RunSpeakerAlignmentUseCase:
             ),
         )
 
-        # alignment_confidence = proporción del segmento cubierta por el speaker ganador
         total_duration = ts_end - ts_start
         if total_duration <= 0:
             return None
@@ -278,7 +238,6 @@ class RunSpeakerAlignmentUseCase:
         diarization: DiarizationResult,
         job_id: str | None,
     ) -> AlignmentResult:
-        """Diarización vacía → alignment_silent_fallback. Sin speaker artificial."""
         return AlignmentResult(
             strategy=ALIGNMENT_STRATEGY_SILENT_FALLBACK,
             source_preprocessed_sha256=str(timestamps.source_preprocessed_sha256),

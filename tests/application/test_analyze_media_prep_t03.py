@@ -1,4 +1,3 @@
-"""Tests UseCase AnalyzeMediaPrepUseCase — con Fake Ports (sin FFmpeg)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,14 +27,7 @@ from app.domain.value_objects.audio import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fake Ports (Dependency Injection. NO subprocess. Deterministico.)
-# ---------------------------------------------------------------------------
-
-
 class AlwaysOKBinaryResolver:
-    """Siempre dice que ffmpeg y ffprobe están OK (path="/fake/bin/...")."""
-
     def resolve(
         self,
         bin_name: str,
@@ -64,8 +56,6 @@ _SHA_C = _validate_sha256_hash("c" * 64)
 
 
 class FakeValidatorOK:
-    """MediaValidatorPort fake. Devuelve un ValidatedMedia determinístico."""
-
     def validate(
         self,
         input_path: Path,
@@ -98,13 +88,10 @@ class FakeValidatorOK:
 
 
 class FakeExtractorOK:
-    """Devuelve un ExtractedAudio deterministic dentro del workspace."""
-
     def extract(self, validated, job_temp_root, ffmpeg_bin_path, ffmpeg_cfg, logger=None):
         ws = Path(job_temp_root) / "workspace"
         ws.mkdir(parents=True, exist_ok=True)
         wav_path = ws / "clip_extracted.wav"
-        # 16-bit mono 16kHz: 1 segundo
         with wav_path.open("wb") as f:
             f.write(b"\x00" * (2 * 1 * 16000))
         return ExtractedAudio(
@@ -122,12 +109,6 @@ class FakeExtractorOK:
 
 
 class FakePreprocessorOK:
-    """Devuelve PreprocessedAudio determinístico 16kHz mono 16-bit.
-
-    APPLIED_FILTERS refleja EXACTAMENTE el pipeline de 6 pasos con
-    2-pass loudnorm peak norm -1.5dBTP + post-verify TP.
-    """
-
     APPLIED: tuple[str, ...] = (
         "highpass_80hz_order4",
         "dc_removal_dcshift_0",
@@ -148,7 +129,6 @@ class FakePreprocessorOK:
         ws = Path(job_temp_root) / "workspace"
         ws.mkdir(parents=True, exist_ok=True)
         out = ws / "clip_preprocessed.wav"
-        # Mismo tamaño fake
         with out.open("wb") as f:
             f.write(b"\x01" * (2 * 1 * 16000))
         return PreprocessedAudio(
@@ -216,11 +196,6 @@ def _settings(tmp_path: Path, enable_auto_temp_cleanup: bool = False) -> AppSett
             target_bit_depth=16,
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests UseCase — Happy Path
-# ---------------------------------------------------------------------------
 
 
 def test_usecase_happy_path_ok(tmp_path) -> None:
@@ -330,7 +305,6 @@ def test_usecase_path_traversal_resolve_invalido_levanta(tmp_path) -> None:
     (outside / "x.wav").write_bytes(b"\x00" * 1024)
     settings = _settings(tmp_path)
     uc = _make_usecase()
-    # Input fuera de data/input: debe fallar
     with pytest.raises(Exception) as excinfo:
         uc.execute(
             input_path=str(outside / "x.wav"),
@@ -338,7 +312,6 @@ def test_usecase_path_traversal_resolve_invalido_levanta(tmp_path) -> None:
             strict=True,
             force_keep_temp=True,
         )
-    # PathManager T02 debe bloquear: InvalidMediaPathError, ValidationFailedError etc
     err_txt = str(excinfo.value).lower()
     assert (
         "data" in err_txt
@@ -346,5 +319,5 @@ def test_usecase_path_traversal_resolve_invalido_levanta(tmp_path) -> None:
         or "root" in err_txt
         or "invalid" in err_txt
         or "path" in err_txt
-        or True  # aceptamos cualquier error de seguridad (no silencioso)
+        or True
     )

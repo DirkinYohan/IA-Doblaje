@@ -1,7 +1,3 @@
-"""Tests unitarios T08 Application RunSpeakerDiarizationUseCase — con FAKE Port.
-
-No requiere pyannote. No toca adapter. Solo FAKE Port.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -71,8 +67,6 @@ def _mk_vad(
 
 
 class _FakeDiarizer:
-    """FAKE port. Registra llamadas."""
-
     def __init__(self, result: DiarizationResult | None = None, error: Exception | None = None):
         self.result = result
         self.error = error
@@ -94,11 +88,6 @@ class _FakeDiarizer:
             num_speakers=1,
             num_turns=1,
         )
-
-
-# =============================================================================
-# Tests
-# =============================================================================
 
 
 class TestInputs:

@@ -1,1 +1,1 @@
-"""Infrastructure — Subpaquete de traducción T15."""
+pass

@@ -1,13 +1,3 @@
-"""Verifica en CHROME REAL el WebSocket y el audio, via DevTools Protocol.
-
-No instala nada: usa el Chrome del sistema con --remote-debugging-port y habla
-CDP por WebSocket. Comprueba:
-  * la pestana carga y el <video> existe,
-  * la URL del WebSocket NO es el puerto de Next (3000) sino el del backend,
-  * el WebSocket se ABRE (no "closed before established"),
-  * el <video> tiene pista de audio y no esta silenciado,
-  * los subtitulos llegan al reproductor.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +13,6 @@ CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 PORT = 9333
 PROFILE = Path(os.environ["TEMP"]) / "ia_doblaje_chrome"
 APP = "http://127.0.0.1:3000"
-# Cuenta con un proyecto que tiene 5 pistas (en original + es/fr/de/pt).
 EMAIL = os.environ.get("IA_E2E_EMAIL", "e2emulti1791304689@e.co")
 
 
@@ -57,8 +46,6 @@ class Session:
             except Exception as exc:  # noqa: BLE001
                 if attempt == 2:
                     raise
-                # La sesion CDP puede caducar (ping del navegador): se reconecta
-                # en el mismo target para no abortar la verificacion.
                 print(f"  [CDP] reconectando ({type(exc).__name__})…")
                 await asyncio.sleep(1)
         raise RuntimeError(f"{method}: sin respuesta")
@@ -83,8 +70,6 @@ async def main() -> int:
     process = subprocess.Popen(
         [
             str(CHROME),
-            # Headless NUEVO: el antiguo (~old) no decodifica medios, así que el
-            # <video> se queda en readyState 0 y se sacan conclusiones falsas.
             "--headless=new",
             f"--remote-debugging-port={PORT}",
             f"--user-data-dir={PROFILE}",
@@ -141,7 +126,6 @@ async def main() -> int:
         print(f"  texto: {str(body)[:120]!r}")
 
         print("\n=== 2. Iniciar sesion desde la propia app ===")
-        # Cuenta con un proyecto que tiene las 5 pistas (en + es/fr/de/pt).
         login = await session.evaluate(
             """
             (async () => {
@@ -160,9 +144,6 @@ async def main() -> int:
         check(login == 200 or login == "200", f"login por la app -> {login}")
 
         print("\n=== 3. Abrir un proyecto REAL con subtitulos ===")
-        # Se elige en la BASE DE DATOS el proyecto mas completo del usuario: si
-        # se navega a un id que ya no existe, el <video> no carga y se sacan
-        # conclusiones falsas.
         import sqlite3
 
         db = sqlite3.connect(Path(r"C:\Users\dirki\Documents\IA\IA-Doblaje") / "data" / "app.sqlite")
@@ -245,7 +226,6 @@ async def main() -> int:
             check(False, f"el video NO se descarga desde la pagina: {media_probe}")
 
         print("\n=== 5. Reproducir y comprobar que suena ===")
-        # Se espera a que el video cargue: si no, no hay nada que reproducir.
         state: dict = {}
         for _ in range(60):
             state = await session.evaluate(
@@ -297,9 +277,6 @@ async def main() -> int:
             check(int(decoded) > 0, f"Chrome ha DECODIFICADO audio ({decoded} bytes)")
 
         print("\n=== 6. Cambio de idioma en el reproductor (sin reprocesar) ===")
-        # Un proyecto ya COMPLETED no muestra el boton Producir (correcto), asi
-        # que aqui se comprueba lo que debe funcionar siempre: cambiar de idioma
-        # de subtitulos al instante sobre los cues ya cargados.
         session.take_events()
         switches = []
         for code in ("en", "fr", "pt", "es", "de"):

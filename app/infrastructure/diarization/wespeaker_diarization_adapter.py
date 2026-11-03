@@ -1,25 +1,3 @@
-"""Infrastructure Adapter Step 08 — WeSpeaker Diarization (alternativa local).
-
-OPCIÓN B autorizada (FASE C.5): diarización local real usando WeSpeaker
-(checkpoint oficial `pyannote/wespeaker-voxceleb-resnet34-LM`, CC-BY-4.0) +
-Silero VAD (ya presente en T04) + clustering oficial WeSpeaker
-(UMAP + HDBSCAN + PAHC, Apache-2.0).
-
-Flujo real (audio → segmentación/actividad → embeddings → clustering → labels):
-    1. VAD (Silero) sobre el WAV para hallar intervalos de voz.
-    2. Por cada intervalo de voz: embeddings por ventana deslizante
-       (Inference window="sliding", duration=1.5 s, step=0.75 s) con el
-       modelo WeSpeaker ResNet34-LM (pyannote.audio).
-    3. Clustering UMAP + HDBSCAN + PAHC (algoritmo oficial de WeSpeaker).
-    4. merge_segments → SpeakerTurn normalizados SPEAKER_NN.
-
-Offline 100%: el checkpoint es local (models/pyannote/wespeaker-voxceleb-
-resnet34-LM/pytorch_model.bin). Sin HF hub, sin URLs, sin tokens.
-
-El adapter implementa SpeakerDiarizerPort y mapea la salida a
-DiarizationResult / SpeakerTurn (contratos existentes). No importa ni
-contamina el dominio con WeSpeaker.
-"""
 from __future__ import annotations
 
 import time
@@ -40,28 +18,17 @@ from app.domain.value_objects.diarization import (
     SpeakerTurn,
 )
 
-# ---------------------------------------------------------------------------
-# Constantes (rutas relativas dentro de models_cache_dir)
-# ---------------------------------------------------------------------------
 MODEL_FOLDERNAME = "pyannote"
 WESPEAKER_SUBFOLDER = "wespeaker-voxceleb-resnet34-LM"
 WESPEAKER_CHECKPOINT_FILENAME = "pytorch_model.bin"
 
-# Parámetros de diarización (defaults oficiales WeSpeaker)
 _DIAR_WINDOW_SECS = 1.5
 _DIAR_PERIOD_SECS = 0.75
 _DIAR_BATCH_SIZE = 32
 _DIAR_MIN_DURATION_SEC = 0.255
 
 
-# ---------------------------------------------------------------------------
-# Loader local (inyectable para tests) — SIN descargas, SIN red.
-# ---------------------------------------------------------------------------
-
-
 class WespeakerDiarizationModelLoader:
-    """Valida y carga el modelo de embeddings WeSpeaker localmente (offline)."""
-
     def __init__(self, settings_getter: Any | None = None) -> None:
         self._settings_getter = settings_getter
 
@@ -81,7 +48,6 @@ class WespeakerDiarizationModelLoader:
         )
 
     def validate(self) -> Path:
-        """Valida que el checkpoint local exista y sea un archivo razonable."""
         cp = self._checkpoint_path()
         if not cp.is_file():
             raise ModelLoadError(
@@ -93,7 +59,6 @@ class WespeakerDiarizationModelLoader:
         return cp
 
     def load(self, checkpoint_path: Path) -> Any:
-        """Carga el modelo pyannote WeSpeakerResNet34 desde checkpoint local."""
         try:
             from pyannote.audio import Model as _PyannoteModel
         except Exception as exc:  # noqa: BLE001
@@ -106,17 +71,7 @@ class WespeakerDiarizationModelLoader:
             ) from exc
 
 
-# ---------------------------------------------------------------------------
-# Adapter
-# ---------------------------------------------------------------------------
-
-
 class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
-    """Diarización local WeSpeaker (ResNet34-LM + Silero VAD + clustering).
-
-    Lazy singleton. Offline estricto. Mapea a DiarizationResult/SpeakerTurn.
-    """
-
     def __init__(
         self,
         *,
@@ -129,7 +84,6 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
         self._model: Any = None
         self._loaded = False
 
-    # ------------------------------------------------------------------
     def _get_model(self) -> Any:
         if not self._loaded:
             cp = self._loader.validate()
@@ -137,7 +91,6 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
             self._loaded = True
         return self._model
 
-    # ------------------------------------------------------------------
     def diarize(
         self,
         preprocessed_audio: PreprocessedAudio,
@@ -165,7 +118,6 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
                 f"{Path(preprocessed_audio.wav_path).name!r}: {exc!r}"
             ) from exc
 
-        # Convertir [begin_sec, end_sec, label] -> SpeakerTurn (ms)
         speaker_turns: list[SpeakerTurn] = []
         for begin_s, end_s, label in turns_sec:
             s_ms = max(0, int(round(begin_s * 1000.0)))
@@ -181,9 +133,7 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
                 )
             )
 
-        # Ordenar ASC y resolver solapamientos (misma semántica que pyannote adapter)
         speaker_turns = self._resolve_overlaps(speaker_turns)
-        # Duración mínima de turno
         speaker_turns = [
             t for t in speaker_turns
             if (t.end_ms - t.start_ms) >= int(thr.min_speaker_duration_ms)
@@ -218,16 +168,12 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
             analysis_metadata={"source": "wespeaker.resnet34-lm.local.v1"},
         )
 
-    # ------------------------------------------------------------------
-    # Núcleo de diarización (testable sin red)
-    # ------------------------------------------------------------------
     def _run_diarization(
         self, wav_path: str, sample_rate: int, max_speakers: int
     ) -> list[tuple[float, float, str]]:
         import numpy as np
         import torch
 
-        # 0) WAV por soundfile: no depende de torchcodec/FFmpeg compartido.
         from app.infrastructure.audio.wav_io import read_wav_as_tensor
 
         pcm, sr = read_wav_as_tensor(wav_path, mono=True, scale_int16=False)
@@ -237,10 +183,8 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
             pcm = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(pcm)
         pcm = pcm.to(torch.float)
 
-        # 1) VAD Silero sobre el WAV (activity/segmentation)
         from silero_vad import get_speech_timestamps
 
-        # Silero v5 espera escala int16 en float32.
         vad_segments = get_speech_timestamps(
             pcm, self._get_vad_model(), return_seconds=True, sampling_rate=sample_rate
         )
@@ -269,7 +213,6 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
             if end_idx <= begin_idx:
                 continue
             seg_wav = pcm[:, begin_idx:end_idx]
-            # embeddings por ventana deslizante sobre el segmento de voz
             feat = inference.slide(seg_wav, sample_rate, hook=None)
             import pyannote.core
 
@@ -292,23 +235,16 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
 
         embeddings = np.vstack(embeddings_list)
 
-        # 2) Clustering oficial WeSpeaker
         labels = self._cluster(embeddings, max_speakers)
 
-        # 3) subsegmentos -> [begin_s, end_s, label]
         subseg2label: list[tuple[float, float, int]] = []
         for span, label in zip(subseg_spans, labels):
             subseg2label.append((span[0], span[1], int(label)))
 
-        # 4) merge_segments (oficial WeSpeaker)
         merged = self._merge_segments(subseg2label)
 
-        # 5) Normalizar labels a SPEAKER_NN deterministas (por orden de aparición)
         return self._normalize_to_speaker_labels(merged)
 
-    # ------------------------------------------------------------------
-    # Helpers (puros, testables)
-    # ------------------------------------------------------------------
 
     def _get_vad_model(self) -> Any:
         if not hasattr(self, "_vad"):
@@ -343,7 +279,6 @@ class WespeakerSpeakerDiarizationAdapter(SpeakerDiarizerPort):
             core_dist_n_jobs=1,
         ).fit_predict(umap_embeddings)
 
-        # PAHC (official WeSpeaker) para merge de clusters
         return list(
             WespeakerSpeakerDiarizationAdapter._pahc(
                 labels, np.array(embeddings), merge_cutoff=0.3, min_cluster_size=3, absorb_cutoff=0.0

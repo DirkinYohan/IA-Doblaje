@@ -1,18 +1,3 @@
-"""Tests unitarios T08 — Wespeaker Diarization Adapter (Opción B autorizada).
-
-Sin modelo real. Usa fakes/loader inyectable para validar:
-- modelo ausente -> ModelLoadError
-- modelo inválido (size < 1KB) -> ModelLoadError
-- carga correcta (fake loader)
-- audio válido (fake pipeline)
-- audio vacío / sin habla -> turns vacíos
-- múltiples hablantes (fake run_diarization)
-- timestamps ordenados
-- speaker labels válidos (SPEAKER_NN)
-- output compatible con DiarizationResult
-- ejecución offline (sin URLs/tokens en código)
-- ausencia de tokens/URLs en configuración (AST audit)
-"""
 from __future__ import annotations
 
 import ast
@@ -91,11 +76,6 @@ class _FakeLoader:
         return self.model
 
 
-# =============================================================================
-# Loader real (validación de paths y offline)
-# =============================================================================
-
-
 class TestWespeakerDiarizationModelLoader:
     def test_modelo_ausente(self, tmp_path: Path):
         loader = WespeakerDiarizationModelLoader(
@@ -105,7 +85,6 @@ class TestWespeakerDiarizationModelLoader:
             loader.validate()
 
     def test_modelo_invalido(self, tmp_path: Path):
-        # crear checkpoint < 1KB
         d = tmp_path / MODEL_FOLDERNAME / WESPEAKER_SUBFOLDER
         d.mkdir(parents=True)
         cp = d / WESPEAKER_CHECKPOINT_FILENAME
@@ -125,11 +104,6 @@ class TestWespeakerDiarizationModelLoader:
             settings_getter=lambda: Mock(paths=Mock(models_cache_dir=tmp_path))
         )
         assert loader.validate() == cp
-
-
-# =============================================================================
-# Adapter con fake loader (diarización mock)
-# =============================================================================
 
 
 class TestWespeakerSpeakerDiarizationAdapter:
@@ -175,7 +149,6 @@ class TestWespeakerSpeakerDiarizationAdapter:
         adapter = WespeakerSpeakerDiarizationAdapter(
             model_loader=_FakeLoader(model=Mock())
         )
-        # entrada desordenada
         adapter._run_diarization = Mock(
             return_value=[
                 (2.0, 3.0, "SPEAKER_00"),
@@ -218,15 +191,9 @@ class TestWespeakerSpeakerDiarizationAdapter:
         adapter = WespeakerSpeakerDiarizationAdapter(
             model_loader=_FakeLoader(model=Mock())
         )
-        # turno de 100 ms < 200 ms default -> filtrado
         adapter._run_diarization = Mock(return_value=[(0.0, 0.1, "SPEAKER_00")])
         res = adapter.diarize(_mk_prep(), _mk_vad(), job_id="test-1234")
         assert res.num_turns == 0
-
-
-# =============================================================================
-# Offline / seguridad (AST audit)
-# =============================================================================
 
 
 class TestWespeakerOfflineSafety:
@@ -234,14 +201,11 @@ class TestWespeakerOfflineSafety:
         src = Path(
             "app/infrastructure/diarization/wespeaker_diarization_adapter.py"
         ).read_text(encoding="utf-8")
-        # Prohibido: uso de tokens/auth en el adapter
         assert "use_auth_token" not in src
         assert "auth_token" not in src
         assert "hf_hub_download" not in src
-        # No debe haber URLs de descarga en runtime
         for line in src.splitlines():
             if "http" in line.lower():
-                # solo docstrings (sin code) — verificar que no sea llamada de red
                 stripped = line.strip()
                 assert stripped.startswith("#") or stripped.startswith('"') or stripped.startswith("'")
 

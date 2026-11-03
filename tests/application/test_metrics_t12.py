@@ -1,8 +1,3 @@
-"""Tests unitarios T12 Application RunMetricsAggregationUseCase.
-
-No requiere IA. Entidades sintéticas + RuntimeMetricsSnapshot. Cubre todas las
-métricas de METRICS.md, disabled, runtime incompleto, SHA, determinismo y AST.
-"""
 from __future__ import annotations
 
 import ast
@@ -142,11 +137,6 @@ def _run(snapshot, lid, asr, vad, diar, align, quality, validation, metrics_enab
         snapshot, lid, asr, vad, diar, align, quality, validation,
         metrics_enabled=metrics_enabled,
     )
-
-
-# =============================================================================
-# Métricas individuales
-# =============================================================================
 
 
 class TestMetrics:
@@ -307,11 +297,6 @@ class TestASTAudit:
             assert not (imports & forbidden), f"{p} importa prohibido: {imports & forbidden}"
 
 
-# =============================================================================
-# Cobertura adicional: casos límite
-# =============================================================================
-
-
 class TestAdditional:
     def test_rtf_gt_1(self):
         r = _run(_snapshot(processing_wall_time_sec=20.0), _lid(), _asr(), _vad(), _diarization(), _alignment([_seg()]), _quality(), _validation())
@@ -366,7 +351,6 @@ class TestAdditional:
         assert r.profile_downgrade_reason == "vram_insuficiente"
 
     def test_disabled_no_runtime_required(self):
-        # con disabled, no se exige wall time > 0
         r = _run(_snapshot(processing_wall_time_sec=0.0), _lid(), _asr(), _vad(), _diarization(), _alignment([_seg()]), _quality(), _validation(), metrics_enabled=False)
         assert r.metrics_enabled is False
 

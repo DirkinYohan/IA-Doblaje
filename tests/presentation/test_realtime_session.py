@@ -33,25 +33,16 @@ def test_traduccion_fallida_no_copia_la_fuente():
     assert finals
     assert finals[-1]["text"] == "Hello"
     assert finals[-1]["translation_error"] == "modelo caido"
-    # El mapa de traducciones está siempre presente (contrato estable) pero
-    # vacío: un fallo NUNCA se sustituye por el texto original.
     assert finals[-1]["translations"] == {}
     assert "Hello" not in finals[-1]["translations"].values()
 
 
 def test_reloj_del_reproductor_y_salto_descarta_audio_antiguo():
-    """El tiempo de los eventos es el del vídeo, no el de las muestras recibidas.
-
-    Tras un salto (epoch nuevo) el audio que llega tarde de la posición
-    anterior se descarta y los eventos llevan el epoch con que se generaron.
-    """
-
     def transcriber(_samples: list[float], _partial: bool) -> str:
         return "texto"
 
     session = RealtimeSession(transcriber, sample_rate=10)
     session.handle({"type": "seek", "time_ms": 0, "epoch": 1})
-    # Reproducción a 2x: 0,5 s de audio por cada segundo de vídeo.
     events = session.handle({"type": "audio", "samples": [0.2] * 5, "time_ms": 31_000, "epoch": 1})
     events += session.handle({"type": "audio", "samples": [0.2] * 5, "time_ms": 32_000, "epoch": 1})
     events += session.handle({"type": "audio", "samples": [0.0] * 5, "time_ms": 33_000, "epoch": 1})
@@ -60,7 +51,6 @@ def test_reloj_del_reproductor_y_salto_descarta_audio_antiguo():
     assert 30_000 <= final["start_ms"] <= 31_000
     assert final["end_ms"] == 33_000
 
-    # Salto al minuto 5: el audio del segundo 33 que llega tarde se ignora.
     cleared = session.handle({"type": "seek", "time_ms": 300_000, "epoch": 2})
     assert cleared == [{"type": "cleared", "time_ms": 300_000, "epoch": 2}]
     assert session.handle({"type": "audio", "samples": [0.2] * 50, "time_ms": 34_000, "epoch": 1}) == []
@@ -73,11 +63,6 @@ def test_reloj_del_reproductor_y_salto_descarta_audio_antiguo():
 
 
 def test_lote_acumulado_transcribe_una_vez_y_no_pierde_finales():
-    """El audio que se acumula mientras se transcribía se procesa de golpe.
-
-    Un parcial por lote (no por trama): así la transcripción no se queda por
-    detrás del vídeo. Un fin de frase dentro del lote sí produce su final.
-    """
     calls: list[bool] = []
 
     def transcriber(_samples: list[float], partial: bool) -> str:
@@ -133,12 +118,10 @@ def test_parciales_sin_traduccion_y_finales_traducidos():
         return {"es": "hola"}
 
     session = RealtimeSession(lambda _s, p: "parcial" if p else "final", sample_rate=10, translator=translator)
-    # Viendo el original: parciales, nunca traducidos.
     events = session.handle({"type": "audio", "samples": [0.2] * 50})
     partials = [event for event in events if event["type"] == "partial"]
     assert partials and all(event["translations"] == {} for event in partials)
 
-    # Viendo una traducción: sin parciales (no le sirven) y final traducido.
     session.handle({"type": "config", "source_language": "en", "targets": ["es"]})
     events = session.handle({"type": "audio", "samples": [0.2] * 50})
     events += session.handle({"type": "audio", "samples": [0.0] * 10})
@@ -148,7 +131,6 @@ def test_parciales_sin_traduccion_y_finales_traducidos():
 
 
 def test_frase_que_ya_llega_tarde_se_descarta_sin_transcribir():
-    """Si el procesamiento va por detrás, las frases viejas no se transcriben."""
     from app.presentation.api.realtime import MAX_LAG_MS
 
     calls: list[int] = []
@@ -161,7 +143,6 @@ def test_frase_que_ya_llega_tarde_se_descarta_sin_transcribir():
     session.handle({"type": "config", "source_language": "en", "targets": ["es"]})
     old = [{"type": "audio", "samples": [0.2] * 5, "time_ms": 1000 + 500 * i} for i in range(4)]
     old.append({"type": "audio", "samples": [0.0] * 5, "time_ms": 3000})
-    # En el mismo lote ya llega audio de mucho después: el reproductor va por delante.
     now = 3000 + MAX_LAG_MS + 2000
     recent = [{"type": "audio", "samples": [0.2] * 5, "time_ms": now + 500 * i} for i in range(4)]
     recent.append({"type": "audio", "samples": [0.0] * 5, "time_ms": now + 2500})

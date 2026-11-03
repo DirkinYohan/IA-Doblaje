@@ -1,8 +1,3 @@
-"""Tests unitarios T14 Infrastructure — TempCleanupAdapter.
-
-Usa filesystem temporal (tmp_path). Cubre eliminación real, árbol, contención,
-traversal, raíz protegida, persistentes, idempotencia y AST.
-"""
 from __future__ import annotations
 
 import ast
@@ -17,11 +12,6 @@ from app.infrastructure.storage.temp_cleanup_adapter import TempCleanupAdapter
 @pytest.fixture
 def adapter():
     return TempCleanupAdapter()
-
-
-# =============================================================================
-# TempCleanupAdapter
-# =============================================================================
 
 
 class TestTempCleanupAdapter:
@@ -56,7 +46,6 @@ class TestTempCleanupAdapter:
             adapter.remove_tree(temp_root=str(tmp_path), job_id="../outside")
 
     def test_remove_root_rejected(self, adapter, tmp_path):
-        # job_id que resuelve al propio temp_root (raíz) debe rechazarse
         with pytest.raises(InvalidMediaPathError):
             adapter.remove_tree(temp_root=str(tmp_path), job_id=".")
 
@@ -77,7 +66,6 @@ class TestTempCleanupAdapter:
         (job / "sub").mkdir(parents=True)
         (job / "a.txt").write_text("x")
         (job / "sub" / "b.txt").write_text("y")
-        # dos ejecuciones (recrear) producen mismo orden
         def run():
             j = tmp_path / "job-5"
             j.mkdir(parents=True, exist_ok=True)
@@ -99,13 +87,13 @@ class TestTempCleanupAdapterProtection:
         (job_b / "g.txt").write_text("y")
         adapter.remove_tree(temp_root=str(tmp_path), job_id="job-a")
         assert not job_a.exists()
-        assert job_b.exists()  # otro job intacto
+        assert job_b.exists()
 
     def test_does_not_remove_temp_root(self, adapter, tmp_path):
         job = tmp_path / "job-c"
         job.mkdir()
         adapter.remove_tree(temp_root=str(tmp_path), job_id="job-c")
-        assert tmp_path.exists()  # temp_root intacto
+        assert tmp_path.exists()
 
 
 class TestASTAudit:
@@ -152,7 +140,6 @@ class TestTempCleanupAdapterAdditional:
         job.mkdir()
         (job / "f.txt").write_text("x")
         adapter.remove_tree(temp_root=str(tmp_path), job_id="job-r")
-        # segunda ejecución: idempotente
         removed2 = adapter.remove_tree(temp_root=str(tmp_path), job_id="job-r")
         assert removed2 == ()
 
@@ -174,7 +161,6 @@ class TestTempCleanupAdapterAdditional:
         assert not job.exists()
 
     def test_no_persistent_removal(self, adapter, tmp_path):
-        # El adapter solo opera bajo temp_root; no toca directorios fuera
         outside = tmp_path / "outside"
         outside.mkdir()
         (outside / "keep.txt").write_text("k")
@@ -194,5 +180,4 @@ class TestTempCleanupAdapterAdditional:
         (job / "z.txt").write_text("x")
         (job / "a.txt").write_text("y")
         removed = adapter.remove_tree(temp_root=str(tmp_path), job_id="job-s")
-        # orden lexicográfico determinista
         assert list(removed) == sorted(removed)

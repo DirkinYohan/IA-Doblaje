@@ -1,7 +1,3 @@
-"""Tests unitarios T05 Application RunLanguageDetectionUseCase — con FAKE Port.
-
-No requiere modelo Whisper. No toca adapter. No requiere torch para UseCase tests (solo Fake Port se usa).
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -40,11 +36,6 @@ from app.application.use_cases.run_language_detection import RunLanguageDetectio
 
 _SHA_A = "a" * 16 + "0" * 48
 _SHA_B = "b" * 16 + "0" * 48
-
-
-# =============================================================================
-# Factory helpers (model_construct sin validation compleja T01 ValidatedMedia fields required
-# =============================================================================
 
 
 class _FakeMediaPrepFactory:
@@ -114,7 +105,7 @@ class _FakeMediaPrepFactory:
 def _build_vad(
     *,
     source_sha: str,
-    intervals,  # list of (start_ms, end_ms, max_conf) or []
+    intervals,
     duration_ms: int = 5000,
 ):
     vints: tuple[VoiceInterval, ...] = tuple(
@@ -144,11 +135,6 @@ def _build_vad(
         channels=1,
         duration_ms=int(duration_ms),
     )
-
-
-# =============================================================================
-# Fake Success Detector Port (no toca infraestructura)
-# =============================================================================
 
 
 @dataclass
@@ -203,16 +189,10 @@ class FakeSuccessLIDPort:
         )
 
 
-# =============================================================================
-# FIXTURE env
-# =============================================================================
-
-
 @pytest.fixture
 def env(tmp_path):
     wav = tmp_path / "x.wav"
     wav.parent.mkdir(parents=True, exist_ok=True)
-    # Create stub file so Path.exists/is_file True
     wav.write_bytes(b"RIFF\xff\x00\x00\x00WAVEfmt " + b"\x00" * (32000 * 5))
     mp = _FakeMediaPrepFactory.build(wav_path=wav, sha256=_SHA_A, duration_sec=5.0)
     vad = _build_vad(
@@ -221,11 +201,6 @@ def env(tmp_path):
         duration_ms=5000,
     )
     return mp, vad, wav
-
-
-# =============================================================================
-# TESTS HAPPY PATH
-# =============================================================================
 
 
 class TestUseCaseHappyPath:
@@ -284,11 +259,6 @@ class TestUseCaseHappyPath:
         assert [a.language_code for a in r1.alternatives] == [a.language_code for a in r2.alternatives]
 
 
-# =============================================================================
-# CHAIN OF CUSTODY
-# =============================================================================
-
-
 class TestChainOfCustody:
     def test_sha_mismatch_t03_t04_raises_validationfailed(self, env):
         mp, _vad_ok, _ = env
@@ -303,11 +273,6 @@ class TestChainOfCustody:
         r = uc.execute(mp, vad)
         assert str(r.source_preprocessed_sha256).lower() == str(mp.preprocessed_audio.sha256).lower()
         assert str(r.vad_reference_sha256).lower() == str(vad.source_preprocessed_sha256).lower()
-
-
-# =============================================================================
-# PREP NONE strict/nonstrict
-# =============================================================================
 
 
 class TestPrepNone:
@@ -331,11 +296,6 @@ class TestPrepNone:
         assert r.language_name == "Undetermined"
         assert r.confidence == 0.0
         assert r.analyzed_strategy == LID_STRATEGY_SILENT_FALLBACK
-
-
-# =============================================================================
-# STRICT THRESHOLD D#8
-# =============================================================================
 
 
 class TestStrictThreshold:
@@ -367,16 +327,8 @@ class TestStrictThreshold:
         thr = LanguageDetectionThresholds(min_confidence=0.8, default_language_override="it")
         port = FakeSuccessLIDPort(confidence=0.3)
         uc = RunLanguageDetectionUseCase(detector=port, strict=True)
-        # Con override presente, no debe raise LanguageDetectionError aunque conf < min.
-        # Fake devuelve confidence 0.3 code es. UseCase no raisea porque default_language_override != None.
         r = uc.execute(mp, vad, thresholds=thr)
-        # Pasamos sin excepción (UseCase no swallows). OK.
         assert r is not None
-
-
-# =============================================================================
-# SILENT FALLBACK vad sin voz
-# =============================================================================
 
 
 class TestSilentFallback:
@@ -397,11 +349,6 @@ class TestSilentFallback:
         uc = RunLanguageDetectionUseCase(detector=FakeSuccessLIDPort(), strict=True)
         r = uc.execute(mp, vad_zero)
         assert r.language_name == "Undetermined"
-
-
-# =============================================================================
-# NO MUTATION
-# =============================================================================
 
 
 class TestNoMutation:
@@ -433,11 +380,6 @@ class TestNoMutation:
         assert int(vad.total_speech_ms) == speech_before
 
 
-# =============================================================================
-# EXCEPCIONES PROPAGACIÓN
-# =============================================================================
-
-
 class TestExceptionsPropagate:
     def test_model_load_error(self, env):
         mp, vad, _ = env
@@ -461,23 +403,12 @@ class TestExceptionsPropagate:
             uc.execute(mp, vad)
 
 
-# =============================================================================
-# JOB ID
-# =============================================================================
-
-
 class TestJobId:
     def test_no_job_id_passed_ok(self, env):
         mp, vad, _ = env
         uc = RunLanguageDetectionUseCase(detector=FakeSuccessLIDPort())
         r = uc.execute(mp, vad)
-        # No raise → ok
         assert isinstance(r, LanguageDetectionResult)
-
-
-# =============================================================================
-# Static audit: Application no imports torch/transformers/whisper/numpy/soundfile
-# =============================================================================
 
 
 def test_application_no_importa_infra():

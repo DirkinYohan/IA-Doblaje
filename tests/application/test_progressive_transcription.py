@@ -1,4 +1,3 @@
-"""Tests del procesamiento progresivo por ventanas (con audio real)."""
 from __future__ import annotations
 
 import struct
@@ -34,14 +33,12 @@ class TestIterWindows:
         windows = iter_windows(100_000, window_ms=30_000, overlap_ms=1_000)
         assert windows[0][0] == 0
         assert windows[-1][1] == 100_000
-        # Cada ventana empieza antes de que acabe la anterior (solape).
         for previous, current in zip(windows, windows[1:], strict=False):
             assert current[0] < previous[1], "debe haber solape para no cortar palabras"
 
     def test_avanza_sin_huecos(self) -> None:
         windows = iter_windows(200_000, window_ms=20_000, overlap_ms=2_000)
         for previous, current in zip(windows, windows[1:], strict=False):
-            # El salto es exactamente el paso (ventana - solape).
             assert current[0] - previous[0] == 18_000
 
     def test_duracion_cero_o_negativa(self) -> None:
@@ -57,10 +54,8 @@ class TestIterWindows:
             iter_windows(10_000, window_ms=1_000, overlap_ms=1_000)
 
     def test_primera_ventana_corta_publica_antes(self) -> None:
-        """La primera ventana puede acortarse para mostrar subtítulos antes."""
         windows = iter_windows(150_000, window_ms=30_000, overlap_ms=1_000, first_window_ms=8_000)
         assert windows[0] == (0, 8_000), f"la primera debe ser corta: {windows[0]}"
-        # Las siguientes mantienen el tamaño nominal y arrancan en el solape.
         assert windows[1] == (7_000, 37_000), f"la segunda arranca en el solape: {windows[1]}"
         assert windows[-1][1] == 150_000
 
@@ -81,7 +76,6 @@ class TestIterWindows:
         assert windows == [(0, 3_000)]
 
     def test_cobertura_completa_con_primera_ventana_corta(self) -> None:
-        """El audio entero queda cubierto: ningún tramo se pierde."""
         total = 150_000
         windows = iter_windows(total, window_ms=30_000, overlap_ms=1_000, first_window_ms=8_000)
         assert windows[0][0] == 0 and windows[-1][1] == total
@@ -95,7 +89,6 @@ class TestAudioWindowReader:
         reader = ProgressiveAudioWindowReader(wav)
         assert reader.duration_ms == 6000
 
-        # Tramo central: valor absoluto medio razonable (tono, no silencio).
         chunk = reader.read(2000, 3000)
         assert chunk.dtype == np.float32
         assert 15_000 < chunk.size < 17_000
@@ -123,8 +116,6 @@ class _FakeSegment:
 
 
 class _FakeASR:
-    """Devuelve un segmento por ventana, con timestamps absolutos."""
-
     def __init__(self) -> None:
         self.calls: list[tuple[int, int]] = []
 
@@ -151,12 +142,10 @@ class TestProgressiveTranscriber:
             on_progress=lambda done, total: progress.append((done, total)),
         )
 
-        # Varias ventanas => varias publicaciones (nunca todo al final).
         assert len(results) >= 3
         assert len(published) == len(results)
         assert all(count >= 1 for count in published), "cada ventana publica sus cues"
 
-        # El progreso es monótono y termina cubriendo todo el audio.
         done_values = [item[0] for item in progress]
         assert done_values == sorted(done_values)
         assert done_values[-1] == reader.duration_ms
@@ -213,21 +202,13 @@ class TestProgressiveTranscriber:
         assert ProgressiveTranscriber(asr=_FakeASR()).process(reader) == []
 
     def test_no_duplica_cues_por_el_solape(self, tmp_path: Path) -> None:
-        """El solape sólo repite el tramo inmediatamente anterior."""
         wav = _write_wav(tmp_path / "g.wav", 12.0)
         reader = ProgressiveAudioWindowReader(wav)
 
         class OverlappingASR:
-            """Simula a Whisper: reemite el final de la ventana anterior.
-
-            Con paso 3000 ms y solape 1000 ms, "repetido" (final de la ventana
-            previa) sólo debe aparecer una vez por frontera, no en cada ventana.
-            """
-
             def transcribe_array(self, audio, *, offset_ms, language, start_index):
                 items = []
                 if offset_ms > 0:
-                    # Final de la ventana anterior, dentro de la zona de solape.
                     items.append(
                         _FakeSegment(offset_ms - 800, offset_ms + 400, "repetido")
                     )
@@ -243,7 +224,6 @@ class TestProgressiveTranscriber:
         assert texts.count("repetido") == 1, f"el solape duplicó cues: {texts}"
         assert len([t for t in texts if t.startswith("nuevo")]) == len(results)
         assert all(cue.end_ms > cue.start_ms for cue in cues)
-        # INVARIANTE: la línea temporal nunca se solapa consigo misma.
         for previous, current in zip(cues, cues[1:], strict=False):
             assert current.start_ms >= previous.end_ms, (
                 f"solape: {previous.start_ms}-{previous.end_ms} y "
@@ -251,13 +231,10 @@ class TestProgressiveTranscriber:
             )
 
     def test_sin_solapes_aunque_el_asr_se_superponga(self, tmp_path: Path) -> None:
-        """El ASR puede devolver segmentos que se pisan; la salida no debe."""
         wav = _write_wav(tmp_path / "h.wav", 20.0)
         reader = ProgressiveAudioWindowReader(wav)
 
         class SloppyASR:
-            """Devuelve segmentos largos que invaden la ventana siguiente."""
-
             def transcribe_array(self, audio, *, offset_ms, language, start_index):
                 return [
                     _FakeSegment(offset_ms, offset_ms + 3500, f"a {offset_ms}"),
@@ -282,8 +259,6 @@ class TestProgressiveTranscriber:
 
 
 class TestTimelineOffsets:
-    """Los tiempos de cada fragmento se trasladan a la línea temporal del vídeo."""
-
     def test_segmento_relativo_a_ventana_se_desplaza_al_video(self) -> None:
         from app.infrastructure.audio.faster_whisper_asr_adapter import _segment_from_raw
 
@@ -296,10 +271,6 @@ class TestTimelineOffsets:
         assert (segment.start_ms, segment.end_ms) == (46_250, 47_500)
 
     def test_cues_coinciden_con_la_linea_temporal_original(self, tmp_path: Path) -> None:
-        """Whisper devuelve tiempos RELATIVOS a cada ventana; el adapter suma el
-        desplazamiento. Se simula exactamente eso con diálogos de tiempos
-        conocidos y se exige que los cues coincidan con ellos, no con su
-        posición dentro de la ventana."""
         from app.infrastructure.audio.faster_whisper_asr_adapter import _segment_from_raw
 
         dialogue = [(2_000, 3_500, "uno"), (7_200, 8_400, "dos"), (21_000, 23_000, "tres"),
@@ -325,5 +296,4 @@ class TestTimelineOffsets:
         ).process(reader)
         got = [(cue.start_ms, cue.end_ms, cue.text) for window in results for cue in window.cues]
         assert got == dialogue
-        # Ventanas sin diálogo también se publican (avanzan la cobertura).
         assert results[-1].end_ms == reader.duration_ms

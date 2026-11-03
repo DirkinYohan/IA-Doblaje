@@ -1,9 +1,3 @@
-"""Tests T06 Infrastructure FasterWhisperSmallASRAdapter — PERF local CT2.
-- NO descarga real de modelos
-- Fake FasterWhisper model duck typing
-- 20+ tests Infraestructura
-- Static audit AST imports reales
-"""
 from __future__ import annotations
 
 import ast
@@ -38,14 +32,9 @@ from app.infrastructure.audio.faster_whisper_asr_adapter import (
 _SHA = "a" * 64
 
 
-# =============================================================================
-# Helpers factories
-# =============================================================================
 def _make_wav_file(p: Path, sample_rate: int = 16000, duration_ms: int = 2000) -> Path:
     n_samples = int(sample_rate * duration_ms / 1000)
-    # int16 mono little-endian
     data = _np.zeros(n_samples, dtype=_np.int16)
-    # Some sinusoid dummy (quiet so no clipping)
     t = _np.arange(n_samples, dtype=_np.float32) / sample_rate
     import math
     data[:] = (_np.sin(2 * math.pi * 440.0 * t) * 8000).astype(_np.int16)
@@ -114,9 +103,6 @@ def _build_lid(source_sha: str, lang_code: str = "es", conf: float = 0.9) -> Lan
     )
 
 
-# =============================================================================
-# Fake Faster-Whisper model (duck typing, no real CT2)
-# =============================================================================
 @dataclass
 class _FakeFWSegment:
     start: float
@@ -186,9 +172,6 @@ class _FakeFWSegmentIterable:
 
 
 def _install_fake_fw_module(monkeypatch, factory_model: _FakeFWModel | None = None):
-    """Stub faster_whisper module BEFORE adapter import-time _FW reference runs.
-    Como el adapter ya intentó importar y lo guardó en _WhisperModel_cls global,
-    reemplazamos ese valor vía atributos en el adapter module."""
     import app.infrastructure.audio.faster_whisper_asr_adapter as _adapter_mod
 
     _fake_model_obj = factory_model or _FakeFWModel()
@@ -202,7 +185,6 @@ def _install_fake_fw_module(monkeypatch, factory_model: _FakeFWModel | None = No
             _FakeWhisperModelCls.instances_created += 1
             _FakeWhisperModelCls.last_init_args = tuple(args)
             _FakeWhisperModelCls.last_init_kwargs = dict(kwargs)
-            # _FakeFWModel returned so transcribe() works
             self._impl = _fake_model_obj
 
         def __getattr__(self, name):
@@ -213,9 +195,6 @@ def _install_fake_fw_module(monkeypatch, factory_model: _FakeFWModel | None = No
     return _fake_model_obj, _FakeWhisperModelCls
 
 
-# =============================================================================
-# Constants / Loader tests (10)
-# =============================================================================
 class TestFasterWhisperConstantsAndLoader:
     def test_model_foldername_constant(self):
         assert MODEL_FOLDERNAME == "whisper_small_ct2_int8_fp16_local_v1"
@@ -259,7 +238,6 @@ class TestFasterWhisperConstantsAndLoader:
         fp.mkdir()
         (fp / "config.json").write_text("{}")
         (fp / "tokenizer.json").write_text("{}")
-        # Falta model.bin
         class _S:
             class paths:
                 models_cache_dir = Path(models_dir).resolve()
@@ -272,10 +250,9 @@ class TestFasterWhisperConstantsAndLoader:
         models_dir.mkdir()
         fp = Path(models_dir) / MODEL_FOLDERNAME
         fp.mkdir()
-        large_bytes = b"X" * (60 * 1024 * 1024)  # 60MB pasa size check
+        large_bytes = b"X" * (60 * 1024 * 1024)
         (fp / "model.bin").write_bytes(large_bytes)
         (fp / "config.json").write_text("{}")
-        # NO tokenizer.json ni vocabulary.txt
         class _S:
             class paths:
                 models_cache_dir = Path(models_dir).resolve()
@@ -292,11 +269,9 @@ class TestFasterWhisperConstantsAndLoader:
             class paths:
                 models_cache_dir = Path(models_dir).resolve()
         loader = FasterWhisperLocalModelLoader(settings_getter=lambda: _S)
-        # Ruta que resuelve FUERA de models_cache_dir → path traversal detectado
         bad_path = Path(models_dir) / ".." / "outside_model"
         with pytest.raises(ModelLoadError, match="Path traversal detectado"):
             loader.load(bad_path, device="cpu")
-        # Ruta DENTRO de models pero que NO existe → no encontrado msg oficial T06
         missing_path = Path(models_dir) / "carpeta_que_no_existe_xyz"
         with pytest.raises(ModelLoadError, match="no encontrado en models/"):
             loader.load(missing_path, device="cpu")
@@ -306,7 +281,7 @@ class TestFasterWhisperConstantsAndLoader:
         models_dir.mkdir()
         fp = Path(models_dir) / MODEL_FOLDERNAME
         fp.mkdir()
-        (fp / "model.bin").write_bytes(b"small" * 1000)  # 5000 bytes < 50 MB
+        (fp / "model.bin").write_bytes(b"small" * 1000)
         (fp / "config.json").write_text("{}")
         (fp / "tokenizer.json").write_text("{}")
         class _S:
@@ -327,19 +302,16 @@ class TestFasterWhisperConstantsAndLoader:
         class _S:
             class paths:
                 models_cache_dir = Path(models_dir).resolve()
-        # Stub el import faster_whisper
         fake_model, cls = _install_fake_fw_module(monkeypatch)
         loader = FasterWhisperLocalModelLoader(settings_getter=lambda: _S)
         loaded = loader.load(fp, device="cpu", compute_type="int8_float16")
         assert cls.instances_created == 1
-        # 1st positional debe ser ruta absoluta carpeta local
         first_arg = cls.last_init_args[0]
         assert Path(first_arg).resolve().is_dir()
         assert "cpu" == cls.last_init_kwargs.get("device")
         assert "int8_float16" == cls.last_init_kwargs.get("compute_type")
 
     def test_loader_ausencia_dependencia_fw_lanza_configuration_error(self, tmp_path, monkeypatch):
-        # Simular _faster_whisper_imported_ok=False
         import app.infrastructure.audio.faster_whisper_asr_adapter as _am
         monkeypatch.setattr(_am, "_faster_whisper_imported_ok", False, raising=False)
         old = _am._ctranslate2_import_err
@@ -360,19 +332,13 @@ class TestFasterWhisperConstantsAndLoader:
         monkeypatch.setattr(_am, "_ctranslate2_import_err", old, raising=False)
 
 
-# =============================================================================
-# Adapter tests transcribe happy path (9)
-# =============================================================================
 class TestFasterWhisperAdapterTranscribe:
     def _install_and_patch_paths(self, monkeypatch, models_dir):
-        # Stub getter rutas
         class _S:
             class paths:
                 models_cache_dir = Path(models_dir).resolve()
         import app.infrastructure.audio.faster_whisper_asr_adapter as _am
-        # Stub loader para que NO requiera 60MB real: fabricar uno con validate_folder_structure no-op
         fake_model, cls = _install_fake_fw_module(monkeypatch)
-        # 2 segmentos fake
         fake_model.return_segments = [
             _FakeFWSegment(start=0.0, end=1.0, text="Hola mundo. ", avg_logprob=-0.3, no_speech_prob=0.01),
             _FakeFWSegment(start=1.0, end=2.0, text="Esto es ASR.", avg_logprob=-0.1, no_speech_prob=0.0),
@@ -397,7 +363,6 @@ class TestFasterWhisperAdapterTranscribe:
             loader=FasterWhisperLocalModelLoader(settings_getter=lambda: _S),
             device_resolver=lambda: "cpu",
         )
-        # WAV real 2s 16kHz mono
         wav_path = tmp_path / "in.wav"
         _make_wav_file(wav_path, 16000, 2000)
         prep = _build_prep(wav_path, duration_ms=2000)
@@ -408,10 +373,8 @@ class TestFasterWhisperAdapterTranscribe:
         assert res.strategy == "full_audio"
         assert res.num_segments == 2
         assert res.model_label == MODEL_LABEL
-        # Language es utilizado (no und)
         call = fake_model.calls[0]
         assert call["language"] == "es"
-        # beam_size 1 default, vad_filter False (T04 ya VAD), word_timestamps False (T07)
         assert call["beam_size"] == 1
         assert call["vad_filter"] is False
         assert call["word_timestamps"] is False
@@ -434,7 +397,6 @@ class TestFasterWhisperAdapterTranscribe:
     def test_confidence_mapeo_avg_logprob_deterministico(self, tmp_path, monkeypatch):
         models_dir = self._make_valid_models_folder(tmp_path)
         _S, fake_model, cls = self._install_and_patch_paths(monkeypatch, models_dir)
-        # avg_logprob = 0 → (0 +6)/6 = 1.0 exacto
         fake_model.return_segments = [_FakeFWSegment(start=0.0, end=0.1, text="hola", avg_logprob=0.0)]
         adapter = FasterWhisperSmallASRAdapter(
             loader=FasterWhisperLocalModelLoader(settings_getter=lambda: _S),
@@ -447,7 +409,6 @@ class TestFasterWhisperAdapterTranscribe:
         lid = _build_lid(_SHA)
         res = adapter.transcribe(prep, vad_result=vad, lid_result=lid)
         assert res.confidence == pytest.approx(1.0)
-        # avg_logprob=-6 (0-based) → ( -6 +6)/6 = 0.0
         fake_model.return_segments = [_FakeFWSegment(start=0.0, end=0.1, text="h", avg_logprob=-6.0)]
         adapter2 = FasterWhisperSmallASRAdapter(
             loader=FasterWhisperLocalModelLoader(settings_getter=lambda: _S),
@@ -473,7 +434,6 @@ class TestFasterWhisperAdapterTranscribe:
         adapter.transcribe(prep, vad_result=vad, lid_result=lid)
         assert adapter.model_is_loaded is True
         assert cls.instances_created == 1
-        # Segunda llamada: modelo NO se carga 2 veces
         adapter.transcribe(prep, vad_result=vad, lid_result=lid)
         assert cls.instances_created == 1
 
@@ -524,9 +484,6 @@ class TestFasterWhisperAdapterTranscribe:
         assert res.total_duration_ms == 800
 
 
-# =============================================================================
-# Static Audit AST imports (no uso real HF/requests, 4 tests)
-# =============================================================================
 _FORBIDDEN_IMPORTS = [
     "huggingface_hub",
     "hf_hub_download",
@@ -580,8 +537,6 @@ class TestStaticAuditASTAdapter:
         assert bad == [], f"Forbidden calls: {bad}"
 
     def test_no_word_timestamps_true_usage(self, tmp_path, monkeypatch):
-        # Verificamos en runtime que fake adapter siempre envía word_timestamps=False
-        # (Test ya ejecutado antes, aquí hacemos AST search de "word_timestamps=True" texto)
         import app.infrastructure.audio.faster_whisper_asr_adapter as _am
         src = Path(_am.__file__).read_text(encoding="utf-8")
         assert "word_timestamps=True" not in src, "Se encontró word_timestamps=True"
@@ -591,9 +546,7 @@ class TestStaticAuditASTAdapter:
         import app.infrastructure.audio.faster_whisper_asr_adapter as _am
         src = Path(_am.__file__).read_text(encoding="utf-8")
         for kw in ["forced_alignment", "pyannote", "SPEAKER_0", "quality_score", "clipping_ratio", "RTF", "VRAM", "cleanup_temp", "transcript.json", "segments.json"]:
-            # Solo listas static audit tests pueden mencionar; adapter core NO
             pass
-        # Adapter implementation file must have ZERO pyannote/diarization
         assert "pyannote" not in src
         assert "diarization" not in src
         assert "quality_score" not in src

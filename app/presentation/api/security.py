@@ -1,4 +1,3 @@
-"""Contraseñas, sesiones firmadas y límite de peticiones. Solo stdlib."""
 from __future__ import annotations
 
 import hashlib

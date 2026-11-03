@@ -1,4 +1,3 @@
-"""Tickets de WebSocket: autentican sin depender de que la cookie viaje."""
 from __future__ import annotations
 
 import os
@@ -27,7 +26,6 @@ def client(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def job(client: TestClient) -> dict[str, str]:
-    """Usuario con un job real en PENDING (creado al subir el medio)."""
     response = sign_up(
         client,
         json={"name": "Ticket", "email": "ticket@example.com", "password": "password123", "confirm": "password123"},
@@ -49,7 +47,6 @@ def test_sin_sesion_no_hay_ticket(client: TestClient, job: dict[str, str]) -> No
 
 def test_ticket_autentica_sin_cookie(client: TestClient, job: dict[str, str]) -> None:
     ticket = client.post("/api/ws-ticket").json()["ticket"]
-    # Navegador en otro host: la cookie NO viaja al backend.
     anonymous = TestClient(client.app)
     with anonymous.websocket_connect(f"/api/jobs/{job['job_id']}/events?ticket={ticket}") as socket:
         first = socket.receive_json()

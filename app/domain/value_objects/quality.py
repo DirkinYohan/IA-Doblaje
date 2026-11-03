@@ -1,7 +1,3 @@
-"""Value Objects Quality Analysis Step 10 — Capa DOMAIN.
-
-Inmutables, validados. Sin dependencias de infraestructura (sin IA).
-"""
 from __future__ import annotations
 
 import math
@@ -15,11 +11,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.functional_validators import BeforeValidator
-
-
-# ---------------------------------------------------------------------------
-# 1) Value Objects escalares
-# ---------------------------------------------------------------------------
 
 
 def _validate_score_0_1(v: object) -> float:
@@ -81,14 +72,7 @@ QualityRuleCode = Literal[
 QualityStrategyName = Literal["quality_rules_qr01_qr11", "quality_silent_fallback"]
 
 
-# ---------------------------------------------------------------------------
-# 2) QualityRuleResult (resultado individual de una regla)
-# ---------------------------------------------------------------------------
-
-
 class QualityRuleResult(BaseModel):
-    """Resultado individual de una regla QR01..QR11."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     rule_code: QualityRuleCode = Field(..., description="Código de regla QR01..QR11.")
@@ -112,7 +96,6 @@ class QualityRuleResult(BaseModel):
 
     @model_validator(mode="after")
     def _consistency(self) -> "QualityRuleResult":
-        # Si no es aplicable: occurrences=0, penalty=0, passed=True (no es fallo)
         if not self.applicable:
             if self.occurrences != 0:
                 raise ValueError("not applicable implica occurrences=0")
@@ -121,27 +104,7 @@ class QualityRuleResult(BaseModel):
         return self
 
 
-# ---------------------------------------------------------------------------
-# 3) QualityThresholds (configuración centralizada T10, independiente de QualityConfig)
-# ---------------------------------------------------------------------------
-# NOTA: Los umbrales de nivel (0.80/0.30) viven en docs/QUALITY_RULES.md y se
-# expresan aquí como defaults. QualityConfig (app/core/config.py) aporta
-# quality_enabled / quality_strict_mode / quality_min_score_to_save, que el
-# UseCase recibe por separado (sin duplicar).
-
-
 class QualityThresholds(BaseModel):
-    """Umbrales del módulo Quality Analysis (QR01..QR11).
-
-    pass_threshold     = 0.80   (score >= pass_threshold → passed)
-    warn_threshold     = 0.30   (warn_threshold <= score < pass_threshold → warning)
-    max_overlap_ms     = 100    (QR04: solape > 100 ms es violación)
-    min_asr_segment_conf = 0.40 (QR07, aplicable solo si hay confianza normalizada por segmento)
-    min_word_conf      = 0.30   (QR08, aplicable solo si hay words)
-    max_segment_sec    = 60.0   (QR09)
-    max_silence_sec    = 15.0   (QR10)
-    """
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     pass_threshold: QualityScore = Field(0.80, description="Umbral para status=passed.")
@@ -151,7 +114,6 @@ class QualityThresholds(BaseModel):
     min_word_conf: QualityScore = Field(0.30, description="QR08 umbral confianza palabra.")
     max_segment_sec: float = Field(60.0, gt=0, description="QR09 duración máxima segmento.")
     max_silence_sec: float = Field(15.0, gt=0, description="QR10 silencio máximo inter-speech.")
-    # Penalizaciones configurables (espejo de QualityConfig.quality_penalty_*).
     penalty_low_conf_segment: QualityScore = Field(
         0.04, description="Penalización QR07 por segmento de baja confianza (config.py default 0.04)."
     )

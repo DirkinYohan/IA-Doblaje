@@ -1,8 +1,3 @@
-"""Preflight / precheck del pipeline — diagnóstico de preparación real.
-
-SOLO LECTURA. Verifica dependencias, binarios, modelos y directorios.
-NO descarga nada. NO inicia el pipeline.
-"""
 from __future__ import annotations
 
 import importlib.util
@@ -20,14 +15,12 @@ class PreflightItem:
 
 
 def run_preflight(settings: AppSettings | None = None) -> list[PreflightItem]:
-    """Devuelve la lista de checks de preparación (solo lectura)."""
     settings = settings or get_settings()
     items: list[PreflightItem] = []
 
     def add(name: str, ok: bool, detail: str = "") -> None:
         items.append(PreflightItem(component=name, ok=ok, detail=detail))
 
-    # --- Python / PyTorch / libs ---
     add("Python", True)
     for mod in ("torch", "torchaudio", "faster_whisper", "pyannote.audio"):
         try:
@@ -36,9 +29,6 @@ def run_preflight(settings: AppSettings | None = None) -> list[PreflightItem]:
             spec = None
         add(mod, spec is not None, "" if spec is not None else "NO INSTALADO")
 
-    # --- FFmpeg / FFprobe ---
-    # Se usa el mismo resolutor que el pipeline real: `shutil.which` no ve el
-    # PATH de WinGet ni el PATH persistido del usuario en Windows.
     from app.infrastructure.audio.ffmpeg_adapters import _locate_binary
 
     for name, binary in (("FFmpeg", "ffmpeg"), ("FFprobe", "ffprobe")):
@@ -49,7 +39,6 @@ def run_preflight(settings: AppSettings | None = None) -> list[PreflightItem]:
             located = ""
         add(name, bool(located), located or "NO ENCONTRADO")
 
-    # --- Modelos ---
     models_dir = Path(settings.paths.models_cache_dir)
     model_checks: dict[str, tuple[Path, int]] = {
         "VAD model (silero_vad_v5.1.jit)": (models_dir / "silero_vad_v5.1.jit", 1024),
@@ -75,7 +64,6 @@ def run_preflight(settings: AppSettings | None = None) -> list[PreflightItem]:
         else:
             add(name, True)
 
-    # --- Directorios ---
     for name, path in (
         ("Input directory", settings.paths.data_input_dir),
         ("Output directory", settings.paths.data_output_dir),

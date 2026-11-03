@@ -18,18 +18,6 @@ from app.domain.value_objects.timestamps import (
 
 
 class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
-    """Normalizador T07 OFFLINE pure Python.
-
-    NO IMPORTA faster_whisper / torch / numpy.
-    NO ACCEDE a WAV_PATH.
-    NO CARGA modelos.
-    NO EJECUTA ASR nuevamente.
-    ÚNICAMENTE opera sobre entidades frozen Prep/Vad/Lid/ASR.
-    """
-
-    # ----------------------------------------------------------------------
-    # API pública (implementa TimestampNormalizerPort)
-    # ----------------------------------------------------------------------
     def normalize(
         self,
         preprocessed_audio: PreprocessedAudio,
@@ -47,7 +35,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
         validation_errors: list[str] = []
 
         raw_segments: list[tuple[int, int, bool, str]] = []
-        # raw_segments entries tuples: (start_ms, end_ms, was_vad_interpolated, source_kind)
         asr_segments_list: list[ASRSegment] = list(asr_result.segments)
         vad_intervals_list: list[VoiceInterval] = list(vad_result.voice_intervals)
 
@@ -55,14 +42,12 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
         num_fw_none_startms_fixed = 0
         strategy_raw: bool = True
 
-        # ----- 1) Resolver start/end por segmento (D#3 si None) -----
         for seg in asr_segments_list:
             start = seg.start_ms
             end = seg.end_ms
             was_vad = False
 
             if start is None or end is None:
-                # D#3: VAD_INTERPOLATE
                 strategy_raw = False
                 if not eff.allow_vad_interpolate_fallback:
                     raise ValidationFailedError(
@@ -89,17 +74,10 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
             source_kind = "vad_interpolate" if was_vad else "fw_raw"
             raw_segments.append((int(start), int(end), was_vad, source_kind))
 
-        # ----- 2) Sort ASC por start_ms (D#4) -----
-        indexed = list(enumerate(raw_segments))  # preserve índice original para auditoría
-        # Ordenamos los segmentos por start_ms ASC, mateniendo el mapeo a ASR orden.
-        # Pero NO queremos desmapear segment_index oficial (debe ser ASC contiguo).
+        indexed = list(enumerate(raw_segments))
         sorted_pairs = sorted(indexed, key=lambda p: (p[1][0], p[1][1], p[0]))
         ordered_raw: list[tuple[int, int, bool, str]] = [p[1] for p in sorted_pairs]
 
-        # ----- 2.5) Descartar segmentos fantasma del padding de la ventana final.
-        # Whisper procesa en ventanas de 30s; un segmento cuyo start >= duración
-        # total del audio es un artefacto del padding (no es habla real) y debe
-        # eliminarse, no clamparse ni inventarse.
         num_out_of_audio_dropped = 0
         filtered_raw: list[tuple[int, int, bool, str]] = []
         for t in ordered_raw:
@@ -109,14 +87,12 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
             filtered_raw.append(t)
         ordered_raw = filtered_raw
 
-        # ----- 3) D#4 Clamp END overlap: end[i] = min(end[i], start[i+1]) -----
         num_overlaps_resolved = 0
         overlap_flags = [False] * len(ordered_raw)
         for i in range(len(ordered_raw) - 1):
             s_i, e_i, v_i, k_i = ordered_raw[i]
             s_next, _e_next, _v_next, _k_next = ordered_raw[i + 1]
             if e_i > s_next:
-                # Clamp
                 new_end = s_next
                 if new_end <= s_i:
                     validation_errors.append(
@@ -126,7 +102,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
                 overlap_flags[i] = True
                 num_overlaps_resolved += 1
 
-        # ----- 4) D#5 Clamp END <= total_duration_ms -----
         num_end_clamped = 0
         end_clamp_flags = [False] * len(ordered_raw)
         for i in range(len(ordered_raw)):
@@ -141,7 +116,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
                 end_clamp_flags[i] = True
                 num_end_clamped += 1
 
-        # ----- 5) Validar start<end después de todos los clamps -----
         durations: list[int] = []
         for i in range(len(ordered_raw)):
             s_i, e_i, _v, _k = ordered_raw[i]
@@ -153,7 +127,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
                 validation_errors.append(msg)
             durations.append(e_i - s_i if e_i > s_i else 0)
 
-        # ----- 6) min_segment_duration_ms safety? Warn no error si non-strict -----
         for i in range(len(ordered_raw)):
             if durations[i] < int(eff.min_segment_duration_ms):
                 validation_errors.append(
@@ -161,7 +134,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
                     f"min_segment_duration_ms={eff.min_segment_duration_ms}"
                 )
 
-        # ----- 7) Construir TimestampedSegments oficiales (orden ASC 0..N-1) -----
         final_segments: list[TimestampedSegment] = []
         for i in range(len(ordered_raw)):
             s_i, e_i, was_vad, kind = ordered_raw[i]
@@ -174,7 +146,7 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
                 segment_index=i,
                 start_ms=s_i,
                 end_ms=e_i,
-                duration_ms=max(1, e_i - s_i) if e_i > s_i else 1,  # lo validamos arriba; frozen validator reject si 0
+                duration_ms=max(1, e_i - s_i) if e_i > s_i else 1,
                 source=kind,  # type: ignore[arg-type]
                 overlap_normalized=bool(overlap_flags[i]),
                 gap_filled=False,
@@ -184,13 +156,11 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
             )
             final_segments.append(ts_seg)
 
-        # ----- 8) Strategy global -----
         if strategy_raw:
             strategy = "segment_ts_from_fw_raw"
         else:
             strategy = "segment_ts_from_vad_interpolate"
 
-        # ----- 9) Strict final? -----
         strict_ok = True
         if validation_errors:
             strict_ok = False
@@ -199,7 +169,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
                     f"T07 strict_validity con validation_errors={list(validation_errors)}"
                 )
 
-        # D#1 compliance: words SIEMPRE tuple()
         return TimestampGenerationResult.build_chain(
             preprocessed_audio=preprocessed_audio,
             vad_result=vad_result,
@@ -221,9 +190,6 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
             confidence=float(asr_result.confidence) if asr_result.confidence is not None else 0.0,
         )
 
-    # ----------------------------------------------------------------------
-    # Internals: VAD interval matching D#3 (sin inventar arbitrarios)
-    # ----------------------------------------------------------------------
     @staticmethod
     def _match_vad_interval(
         *,
@@ -233,28 +199,16 @@ class BasicTimestampNormalizerAdapter(TimestampNormalizerPort):
         segment_text_len: int,
         total_duration_ms: int,
     ) -> tuple[int | None, int | None]:
-        """Regla D#3 VAD_INTERPOLATE.
-
-        Matching heurístico SEGURO (no inventar):
-          1) Si M voice_intervals == num_asr_total == N y N>0 → 1:1 por posición ASC-ASC
-          2) Sino (N != M):
-               - Si existe VoiceInterval con índice == seg_index → elijo ese
-               - Sino → intentar "mejor solapamiento" pero sin start/end ASR no es factible.
-                 → Retornar (None, None) que caller trata como ValidationFailedError.
-        """
         if not vad_intervals:
             return None, None
         M = len(vad_intervals)
         N = num_asr_total
-        # Caso 1: 1:1 ASC match. Siempre seguro si ambos números coinciden.
         if M == N:
             vi = vad_intervals[seg_index]
             return int(vi.start_ms), int(vi.end_ms)
-        # Caso 2: Index direct si existe.
         if 0 <= seg_index < M:
             vi = vad_intervals[seg_index]
             return int(vi.start_ms), int(vi.end_ms)
-        # Caso 3: seg_index >= M. Usar último voice interval si existe, sin inventar fuera.
         if M > 0:
             vi = vad_intervals[-1]
             return int(vi.start_ms), int(vi.end_ms)

@@ -17,7 +17,6 @@ from app.domain.value_objects.asr import (
     ASRStrategyName,
     AsrThresholds,
 )
-# Constantes 16kHz mono 16-bit — iguales que sanity check en run_vad.py (literales int)
 AUDIO_16KHZ_SAMPLE_RATE: int = 16000
 CHANNELS_MONO: int = 1
 BIT_DEPTH_16: int = 16
@@ -25,15 +24,10 @@ BIT_DEPTH_16: int = 16
 
 @dataclass(frozen=True, slots=True, weakref_slot=False)
 class RunASRUseCase:
-    """UseCase Step 06 ASR / Transcription — sin torch/faster_whisper/transformers."""
-
     asr_port: ASRPort
     strict: bool = True
     default_thresholds: AsrThresholds | None = None
 
-    # =========================================================================
-    # API PÚBLICA
-    # =========================================================================
     def run(
         self,
         preprocessed_audio: PreprocessedAudio | None,
@@ -43,9 +37,6 @@ class RunASRUseCase:
         thresholds: AsrThresholds | None = None,
         job_id: str | None = None,
     ) -> ASRResult:
-        # -----------------------------------------------------------------
-        # 1) None guards
-        # -----------------------------------------------------------------
         if preprocessed_audio is None:
             raise ValidationFailedError("RunASRUseCase: preprocessed_audio es None")
         if vad_result is None:
@@ -55,9 +46,6 @@ class RunASRUseCase:
                 "RunASRUseCase: language_detection_result es None"
             )
 
-        # -----------------------------------------------------------------
-        # 2) Sanity checks audio (T03 garantiza estos valores, pero doble check safety)
-        # -----------------------------------------------------------------
         if preprocessed_audio.sample_rate != AUDIO_16KHZ_SAMPLE_RATE:
             raise ValidationFailedError(
                 f"RunASRUseCase requiere sample_rate={AUDIO_16KHZ_SAMPLE_RATE}, "
@@ -74,14 +62,8 @@ class RunASRUseCase:
                 f"recibido {preprocessed_audio.bit_depth}"
             )
 
-        # -----------------------------------------------------------------
-        # 3) Thresholds effective
-        # -----------------------------------------------------------------
         effective_thresholds = self._resolve_thresholds(thresholds)
 
-        # -----------------------------------------------------------------
-        # 4) Chain of custody T03==T04==T05
-        # -----------------------------------------------------------------
         prep_sha = preprocessed_audio.sha256
         vad_sha = vad_result.source_preprocessed_sha256
         lid_sha = language_detection_result.source_preprocessed_sha256
@@ -91,9 +73,6 @@ class RunASRUseCase:
                 f"preprocessed={prep_sha} vad_ref={vad_sha} lid_ref={lid_sha}"
             )
 
-        # -----------------------------------------------------------------
-        # 5) Safety max duration (anti memory exhaustion)
-        # -----------------------------------------------------------------
         total_ms = int(preprocessed_audio.duration_sec * 1000)
         max_ms = int(effective_thresholds.max_audio_duration_minutes * 60 * 1000)
         if total_ms > max_ms:
@@ -102,10 +81,6 @@ class RunASRUseCase:
                 f"máximo configurado {max_ms}ms ({effective_thresholds.max_audio_duration_minutes}min)"
             )
 
-        # -----------------------------------------------------------------
-        # 6) D#9 Silent fallback si num_intervals==0
-        #    NO ejecutar modelo. Funciona independientemente strict=True/False.
-        # -----------------------------------------------------------------
         if (
             vad_result.num_intervals == 0
             and effective_thresholds.allow_empty_transcript_when_no_voice
@@ -118,9 +93,6 @@ class RunASRUseCase:
                 job_id=job_id,
             )
 
-        # -----------------------------------------------------------------
-        # 7) Delegar a ASRPort
-        # -----------------------------------------------------------------
         try:
             asr_result = self.asr_port.transcribe(
                 preprocessed_audio,
@@ -136,9 +108,6 @@ class RunASRUseCase:
                 f"RunASRUseCase error ASR sin clasificar: {type(exc).__name__}: {exc}"
             ) from exc
 
-        # -----------------------------------------------------------------
-        # 8) Post-conditions: strategy + chain of custody re-validado
-        # -----------------------------------------------------------------
         self._post_validate_result(
             asr_result,
             prep_sha=prep_sha,
@@ -147,11 +116,7 @@ class RunASRUseCase:
             thresholds_used=effective_thresholds,
         )
 
-        # -----------------------------------------------------------------
-        # 9) D#8 Strict confidence threshold (min_transcript_confidence)
-        # -----------------------------------------------------------------
         if self.strict and asr_result.confidence < effective_thresholds.min_transcript_confidence:
-            # Solo rechazamos si REALMENTE había segmentos (si 0 segmentos es silent fallback que no pasa por aquí)
             if len(asr_result.segments) > 0 or asr_result.num_segments > 0:
                 raise ValidationFailedError(
                     f"RunASRUseCase strict=True: confidence={asr_result.confidence:.4f} < "
@@ -160,9 +125,6 @@ class RunASRUseCase:
 
         return asr_result
 
-    # =========================================================================
-    # HELPERS
-    # =========================================================================
     def _resolve_thresholds(self, incoming: AsrThresholds | None) -> AsrThresholds:
         if incoming is not None:
             return incoming
@@ -179,8 +141,6 @@ class RunASRUseCase:
         thresholds: AsrThresholds,
         job_id: str | None,
     ) -> ASRResult:
-        # Silent fallback: confidence 0.0, language_code = "und" (indeterminado)
-        # strategy = "asr_silent_fallback". Sin segmentos. Sin cargar modelo.
         fallback_model_label = "silent-fallback:no-voice:v1"
         strategy: ASRStrategyName = "asr_silent_fallback"
         return ASRResult.build_chain(
@@ -211,7 +171,6 @@ class RunASRUseCase:
         lid_sha: str,
         thresholds_used: AsrThresholds,
     ) -> None:
-        # Validaciones de contrato chain of custody
         if (
             result.source_preprocessed_sha256 != prep_sha
             or result.vad_reference_sha256 != vad_sha
@@ -221,13 +180,9 @@ class RunASRUseCase:
                 "RunASRUseCase resultado ASR chain of custody corrupto "
                 "(adapter no respetó hashes)."
             )
-        # Strategy OK
         if result.strategy not in ("full_audio", "only_voice_concat", "asr_silent_fallback"):
             raise ASRProcessingError(
                 f"RunASRUseCase strategy desconocida: {result.strategy!r}"
             )
-        # Thresholds referenciado
         if result.thresholds_used is not thresholds_used:
-            # Permitimos igualdad si es el mismo (referencia no obligatoria)
-            # No forzamos identidad de objeto
             pass

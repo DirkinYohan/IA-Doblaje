@@ -1,8 +1,3 @@
-"""Infrastructure Adapter Step 13 — JsonOutputWriter (filesystem + stdlib json).
-
-INFRASTRUCTURE ONLY. Aquí sí se accede al filesystem. Sin IA, sin red.
-Serializa con allow_nan=False (rechaza NaN/Inf) y calcula SHA256 de los bytes.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -15,11 +10,6 @@ from app.domain.interfaces.output_ports import JsonOutputWriterPort
 
 
 class JsonOutputWriter(JsonOutputWriterPort):
-    """Implementación concreta del JsonOutputWriterPort.
-
-    Usa únicamente filesystem + stdlib. allow_nan=False (estricto).
-    """
-
     def write_json(
         self,
         *,
@@ -29,7 +19,6 @@ class JsonOutputWriter(JsonOutputWriterPort):
         indent: int,
         ensure_ascii: bool,
     ) -> str:
-        # Serializar con allow_nan=False (rechaza NaN/Inf)
         try:
             raw = json.dumps(
                 document,
@@ -45,7 +34,6 @@ class JsonOutputWriter(JsonOutputWriterPort):
 
         data = raw.encode("utf-8")
 
-        # Escribir bytes exactos
         try:
             out_dir = Path(output_directory)
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -56,7 +44,6 @@ class JsonOutputWriter(JsonOutputWriterPort):
                 f"No se pudo escribir {filename!r} en {output_directory!r}: {exc!r}"
             ) from exc
 
-        # SHA256 sobre los bytes exactos escritos
         return hashlib.sha256(data).hexdigest()
 
 

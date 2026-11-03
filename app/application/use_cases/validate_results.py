@@ -1,8 +1,3 @@
-"""UseCase RunValidationUseCase — Capa APPLICATION (T11 Step 11 Validation).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO importa torch/pyannote/numpy/speechbrain (clean architecture).
-"""
 from __future__ import annotations
 
 import time
@@ -32,17 +27,8 @@ log = get_logger("app.application.use_cases.validate_results")
 
 @dataclass(frozen=True, slots=True)
 class RunValidationUseCase:
-    """Orquesta Step 11 Validation. Inmutable.
-
-    Input: (QualityResult, AlignmentResult, VadResult, ASRResult, DiarizationResult).
-    Output: ValidationResult frozen con chain of custody 8-SHA.
-    """
-
     strict_quality: bool = True
 
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -56,7 +42,6 @@ class RunValidationUseCase:
         job_id: str | None = None,
         force_save: bool = False,
     ) -> ValidationResult:
-        # 1) None inputs
         for name, obj in (
             ("quality", quality),
             ("alignment", alignment),
@@ -70,12 +55,10 @@ class RunValidationUseCase:
         bind_context(job_id=job_id, phase="VALIDATION", model=MODEL_LABEL_VALIDATION_V1_LITERAL)
         t0 = time.perf_counter()
 
-        # 2) Thresholds
         eff: ValidationThresholds = thresholds or ValidationThresholds()
         if not isinstance(eff, ValidationThresholds):
             raise ValidationFailedError("RunValidationUseCase: thresholds no es ValidationThresholds")
 
-        # 3) Política Quality FAILED (B5)
         if (
             quality.quality_level == QualityLevel.FAILED
             and eff.strict_quality
@@ -86,7 +69,6 @@ class RunValidationUseCase:
                 "y strict_quality=True sin force_save."
             )
 
-        # 4) Ejecutar checks VC01..VC11 en orden determinista
         checks = self._evaluate_checks(
             quality=quality,
             alignment=alignment,
@@ -96,7 +78,6 @@ class RunValidationUseCase:
             thresholds=eff,
         )
 
-        # 5) Agregar
         errors: list[str] = []
         warnings: list[str] = []
         for c in checks:
@@ -109,7 +90,6 @@ class RunValidationUseCase:
         num_warnings = len(warnings)
         num_passed = sum(1 for c in checks if c.outcome == "passed")
 
-        # status
         if num_errors > 0 or quality.quality_level == QualityLevel.FAILED:
             status: str = "failed"
         elif num_warnings > 0:
@@ -117,9 +97,6 @@ class RunValidationUseCase:
         else:
             status = "passed"
 
-        # 6) Errores estructurales siempre abortan (force_save NO los ignora).
-        #    Se lanzan ANTES de construir ValidationResult para evitar construir
-        #    una entidad con cadena SHA rota (que produciría ValidationError).
         if num_errors > 0:
             raise ValidationFailedError(
                 f"RunValidationUseCase: {num_errors} errores estructurales de validación: "
@@ -162,9 +139,6 @@ class RunValidationUseCase:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # Checks VC01..VC11
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _evaluate_checks(
@@ -190,7 +164,6 @@ class RunValidationUseCase:
             RunValidationUseCase._vc11(quality, alignment),
         ]
 
-    # VC01: SHA chain coherente
     @staticmethod
     def _vc01(quality, alignment, vad, asr_result, diarization) -> ValidationCheckResult:
         source = str(alignment.source_preprocessed_sha256).lower()
@@ -210,7 +183,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC01", outcome="passed", message="sha_chain_ok")
 
-    # VC02: mismo job_id
     @staticmethod
     def _vc02(quality, alignment, vad, asr_result, diarization) -> ValidationCheckResult:
         ids = {
@@ -227,7 +199,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC02", outcome="passed", message="job_id_ok")
 
-    # VC03: duración coherente y no negativa
     @staticmethod
     def _vc03(quality, alignment, vad) -> ValidationCheckResult:
         durations = [
@@ -247,7 +218,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC03", outcome="passed", message="duration_ok")
 
-    # VC04: segment counts coherentes
     @staticmethod
     def _vc04(alignment) -> ValidationCheckResult:
         ns = int(alignment.num_segments)
@@ -264,7 +234,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC04", outcome="passed", message="segment_counts_ok")
 
-    # VC05: cada DialogueSegment válido
     @staticmethod
     def _vc05(alignment) -> ValidationCheckResult:
         total = int(alignment.total_duration_ms)
@@ -281,7 +250,6 @@ class RunValidationUseCase:
                 return ValidationCheckResult(check_code="VC05", outcome="error", message="invalid_index")
         return ValidationCheckResult(check_code="VC05", outcome="passed", message="dialogue_ok")
 
-    # VC06: speakers existentes en DiarizationResult
     @staticmethod
     def _vc06(alignment, diarization) -> ValidationCheckResult:
         valid = {str(t.speaker_label) for t in diarization.speaker_turns}
@@ -293,7 +261,6 @@ class RunValidationUseCase:
                 )
         return ValidationCheckResult(check_code="VC06", outcome="passed", message="speakers_ok")
 
-    # VC07: ASR segments coherentes
     @staticmethod
     def _vc07(alignment, asr_result) -> ValidationCheckResult:
         if int(asr_result.num_segments) != len(asr_result.segments):
@@ -303,7 +270,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC07", outcome="passed", message="transcription_ok")
 
-    # VC08: idioma coherente
     @staticmethod
     def _vc08(alignment, asr_result) -> ValidationCheckResult:
         if str(alignment.transcript_language_code) != str(asr_result.transcript_language_code):
@@ -313,7 +279,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC08", outcome="passed", message="language_ok")
 
-    # VC09: score en [0,1] y level coherente
     @staticmethod
     def _vc09(quality, thresholds) -> ValidationCheckResult:
         score = float(quality.overall_quality_score)
@@ -332,7 +297,6 @@ class RunValidationUseCase:
             )
         return ValidationCheckResult(check_code="VC09", outcome="passed", message="quality_ok")
 
-    # VC10: contadores de rule_results coherentes (derivados)
     @staticmethod
     def _vc10(quality) -> ValidationCheckResult:
         results = quality.rule_results
@@ -354,7 +318,6 @@ class RunValidationUseCase:
             message=f"rule_counts_ok not_applicable={not_applicable}",
         )
 
-    # VC11: quality_reference coherente con cadena T09
     @staticmethod
     def _vc11(quality, alignment) -> ValidationCheckResult:
         if str(quality.source_preprocessed_sha256).lower() != str(alignment.source_preprocessed_sha256).lower():

@@ -13,9 +13,6 @@ from app.domain.value_objects.timestamps import (
 )
 
 
-# =========================================================================
-# Helpers Base wrappers frozen forbid (igual pattern T06 tests VO Domain)
-# =========================================================================
 class W_TStart(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     value: TimedStartMs
@@ -31,9 +28,6 @@ class W_TConf(BaseModel):
     value: TimestampConfidence01
 
 
-# =========================================================================
-# TestTimedStartMs (≥ 6 tests)
-# =========================================================================
 class TestTimedStartMs:
     def test_zero_ok(self):
         t = W_TStart(value=0)
@@ -69,9 +63,6 @@ class TestTimedStartMs:
             W_TStart.model_validate({"value": 10, "extra": 1})
 
 
-# =========================================================================
-# TestTimedEndMs (≥ 5 tests)
-# =========================================================================
 class TestTimedEndMs:
     def test_ok(self):
         assert W_TEnd(value=500).value == 500
@@ -92,9 +83,6 @@ class TestTimedEndMs:
             W_TEnd.model_validate({"value": 1, "e": 2})
 
 
-# =========================================================================
-# TestTimestampConfidence01 (≥ 6 tests)
-# =========================================================================
 class TestTimestampConfidence01:
     def test_zero_one(self):
         assert W_TConf(value=0.0).value == 0.0
@@ -126,9 +114,6 @@ class TestTimestampConfidence01:
             W_TConf(value="high")
 
 
-# =========================================================================
-# TestTimestampStrategyName Literal (≥ 3 tests)
-# =========================================================================
 class TestTimestampStrategyName:
     def test_valid_values(self):
         v: TimestampStrategyName = "segment_ts_from_fw_raw"
@@ -150,9 +135,6 @@ class TestTimestampStrategyName:
         assert k in {"fw_raw", "vad_interpolate", "heuristic_gap_fill", "silent"}
 
 
-# =========================================================================
-# TestAsrTimestampThresholds (≥ 6 tests)
-# =========================================================================
 class TestAsrTimestampThresholds:
     def test_defaults(self):
         t = AsrTimestampThresholds()
@@ -189,8 +171,3 @@ class TestAsrTimestampThresholds:
     def test_strict_validity_non_bool_rejected(self):
         with pytest.raises(ValidationError):
             AsrTimestampThresholds(strict_validity="strict")
-
-
-# =========================================================================
-# Summary helpers count: TOTAL Domain tests ≥ 27
-# =========================================================================

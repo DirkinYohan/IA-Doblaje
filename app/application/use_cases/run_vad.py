@@ -1,8 +1,3 @@
-"""UseCase RunVoiceActivityDetection — Capa APPLICATION (T04 Step 04 VAD).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO importa torch/silero/soundfile/subprocess (clean architecture).
-"""
 from __future__ import annotations
 
 import copy
@@ -33,13 +28,8 @@ log = get_logger("app.application.use_cases.run_vad")
 
 @dataclass
 class RunVoiceActivityDetectionUseCase:
-    """Orquesta Step 04 VAD. Inmutable. DI via constructor."""
-
     vad_detector: VoiceActivityDetectorPort
 
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
 
     def execute(
         self,
@@ -49,11 +39,6 @@ class RunVoiceActivityDetectionUseCase:
         thresholds: VadThresholds | None = None,
         strict: bool = True,
     ) -> VadResult:
-        """Ejecutar VAD sobre media_prep_result.preprocessed_audio (T03).
-
-        NO muta media_prep_result (T03 protegido). Return VadResult chain-of-custody.
-        """
-        # (0) context logging
         jid: str = job_id or media_prep_result.job_id
         bind_context(job_id=jid, phase="VAD", model=MODEL_LABEL_SILERO_V5_1_LITERAL)
 
@@ -63,7 +48,6 @@ class RunVoiceActivityDetectionUseCase:
             extra={"profile": str(media_prep_result.profile), "strict": strict},
         )
 
-        # (1) Sanity exist preprocessed_audio
         prep = media_prep_result.preprocessed_audio
         if prep is None:
             if strict:
@@ -77,10 +61,8 @@ class RunVoiceActivityDetectionUseCase:
                 thresholds=thresholds or VadThresholds(),
             )
 
-        # (2) Sanity formato 16k mono 16-bit
         self._sanity_preprocessed_audio(prep, strict=strict)
 
-        # (3) Thresholds centralizados (defaults T04 si None).
         thr: VadThresholds = thresholds or VadThresholds()
         log.info(
             "run_vad_thresholds_used",
@@ -92,7 +74,6 @@ class RunVoiceActivityDetectionUseCase:
             },
         )
 
-        # (4) Delegar al Port (Dependency Inversion)
         try:
             vad_result: VadResult = self.vad_detector.detect(
                 preprocessed=prep,
@@ -107,15 +88,12 @@ class RunVoiceActivityDetectionUseCase:
                 f"run_vad unexpected error: {exc!r}"
             ) from exc
 
-        # (5) Chain of Custody SHA-256 CHECK
         if str(vad_result.source_preprocessed_sha256).lower() != str(prep.sha256).lower():
             raise ValidationFailedError(
                 "Chain of Custody rota: VadResult.source_preprocessed_sha256 != "
                 f"PreprocessedAudio.sha256. ({vad_result.source_preprocessed_sha256} != {prep.sha256})"
             )
 
-        # (6) Inmutabilidad T03: Asegurar que no se modificó MediaPrepResult (deep copy igual)
-        # (Sólo un check defensivo; Python no lo garantiza pero detectamos asignaciones attrs conocidos.)
         self._assert_not_mutated(media_prep_result, prep)
 
         t1 = time.perf_counter()
@@ -131,9 +109,6 @@ class RunVoiceActivityDetectionUseCase:
         )
         return vad_result
 
-    # ------------------------------------------------------------------
-    # INTERNAL HELPERS
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _sanity_preprocessed_audio(prep: PreprocessedAudio, strict: bool) -> None:
@@ -166,7 +141,6 @@ class RunVoiceActivityDetectionUseCase:
         orig_prep_ref: PreprocessedAudio,
     ) -> None:
         if media_prep_result.preprocessed_audio is not orig_prep_ref:
-            # El adapter reasignó el mismo valor por alguna razón? No permitimos que altere nada.
             new = media_prep_result.preprocessed_audio
             if new is None:
                 raise ValidationFailedError(

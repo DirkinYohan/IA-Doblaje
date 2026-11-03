@@ -1,4 +1,3 @@
-"""Tests unitarios T03 para Value Objects audio (domain). Pydantic V2 Annotated."""
 from __future__ import annotations
 
 import hashlib
@@ -23,7 +22,6 @@ from app.domain.value_objects.audio import (
 )
 
 
-# Test helper model (porque Annotated se valida dentro de un modelo Pydantic)
 class _DutModel(BaseModel):
     model_config = {"extra": "forbid"}
     sample_rate: SampleRate = 16000
@@ -32,11 +30,6 @@ class _DutModel(BaseModel):
     duration: AudioDuration = 0.0
     sha: Sha256Hash = "a" * 64
     bytes_sz: FileBytes = 0
-
-
-# ---------------------------------------------------------------------------
-# SampleRate
-# ---------------------------------------------------------------------------
 
 
 def test_sample_rate_ok() -> None:
@@ -56,11 +49,6 @@ def test_sample_rate_invalid_bounds() -> None:
         _validate_sample_rate("hello")
 
 
-# ---------------------------------------------------------------------------
-# ChannelCount
-# ---------------------------------------------------------------------------
-
-
 def test_channelcount_mono_stereo() -> None:
     assert _validate_channel_count(1) == 1
     assert _validate_channel_count(2) == 2
@@ -73,11 +61,6 @@ def test_channelcount_invalid() -> None:
         _validate_channel_count(3)
     with pytest.raises(ValidationError):
         _DutModel(channels=3)
-
-
-# ---------------------------------------------------------------------------
-# BitDepth
-# ---------------------------------------------------------------------------
 
 
 def test_bitdepth_allowed() -> None:
@@ -93,11 +76,6 @@ def test_bitdepth_invalid() -> None:
             _validate_bit_depth(bd)
     with pytest.raises(ValidationError):
         _DutModel(bit_depth=15)
-
-
-# ---------------------------------------------------------------------------
-# AudioDuration
-# ---------------------------------------------------------------------------
 
 
 def test_audio_duration_positive() -> None:
@@ -119,11 +97,6 @@ def test_audio_duration_negative_invalid() -> None:
         _DutModel(duration=-5.0)
 
 
-# ---------------------------------------------------------------------------
-# Sha256Hash
-# ---------------------------------------------------------------------------
-
-
 def test_sha256_valid() -> None:
     h = hashlib.sha256(b"hello t03").hexdigest()
     assert _validate_sha256_hash(h) == h.lower()
@@ -143,11 +116,6 @@ def test_sha256_invalid() -> None:
         _validate_sha256_hash("zz" * 32)
     with pytest.raises(ValidationError):
         _DutModel(sha="short123")
-
-
-# ---------------------------------------------------------------------------
-# FileBytes
-# ---------------------------------------------------------------------------
 
 
 def test_filebytes_ok() -> None:

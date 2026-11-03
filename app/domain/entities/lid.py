@@ -1,10 +1,3 @@
-"""Entidad LanguageDetectionResult Step 05 LID — Capa DOMAIN.
-
-Frozen + extra=forbid. Chain of custody triple:
-  PreprocessedAudio.sha256 == VadResult.source_preprocessed_sha256 == source_preprocessed_sha256
-
-Sin dependencias infraestructura (no torch/transformers).
-"""
 from __future__ import annotations
 
 from typing import Literal
@@ -48,8 +41,6 @@ LID_STRATEGIES_TYPE = (
 
 
 class LanguageDetectionResult(BaseModel):
-    """Resultado Step 05 Language Detection. Inmutable. Chain of Custody triple."""
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -57,9 +48,6 @@ class LanguageDetectionResult(BaseModel):
         protected_namespaces=(),
     )
 
-    # ------------------------------------------------------------------
-    # Chain of Custody
-    # ------------------------------------------------------------------
 
     source_preprocessed_sha256: Sha256Hash = Field(
         ...,
@@ -70,9 +58,6 @@ class LanguageDetectionResult(BaseModel):
         description="Copia directa de VadResult.source_preprocessed_sha256 para auditoría doble binding.",
     )
 
-    # ------------------------------------------------------------------
-    # Predicción primaria
-    # ------------------------------------------------------------------
 
     language_code: LanguageCode = Field(
         ..., description="ISO 639-1 lowercase primary. 'und' para silent fallback / baja confianza undetermined."
@@ -84,18 +69,12 @@ class LanguageDetectionResult(BaseModel):
         ..., description="Confianza predicción primaria [0,1]. Silent fallback = 0.0."
     )
 
-    # ------------------------------------------------------------------
-    # Alternatives Top-3 (PIPELINE.md requerido)
-    # ------------------------------------------------------------------
 
     alternatives: tuple[LanguageAlternative, ...] = Field(
         default_factory=tuple,
         description="Top-K alternativas, excluyendo primario. Orden DESC confidence. Máx 3. Silent fallback = ().",
     )
 
-    # ------------------------------------------------------------------
-    # Duraciones y estrategia
-    # ------------------------------------------------------------------
 
     total_duration_ms: LidDurationMs = Field(
         0, description="Duración total audio PreprocessedAudio T03 (ms)."
@@ -111,9 +90,6 @@ class LanguageDetectionResult(BaseModel):
         0, ge=0, description="Número de VadResult.voice_intervals concatenados para el encoder."
     )
 
-    # ------------------------------------------------------------------
-    # Modelo + Metadata T03
-    # ------------------------------------------------------------------
 
     model_label: Literal["whisper-encoder-small-lid:v1"] = Field(
         MODEL_LABEL_WHISPER_LID_V1_LITERAL,
@@ -123,9 +99,6 @@ class LanguageDetectionResult(BaseModel):
     channels: ChannelCount = Field(1, description="Canales PreprocessedAudio. Siempre 1 mono.")
     bit_depth: BitDepth = Field(16, description="Bit depth PreprocessedAudio. Siempre 16-bit PCM.")
 
-    # ------------------------------------------------------------------
-    # Configuración aplicada + metadata auditoría
-    # ------------------------------------------------------------------
 
     thresholds: LanguageDetectionThresholds = Field(
         default_factory=LanguageDetectionThresholds,
@@ -136,13 +109,9 @@ class LanguageDetectionResult(BaseModel):
         description="Metadata agregada auditoría. Sin tensores / logits raw. Sin audio. Solo str/int/float/bool/nested dicts de esos tipos.",
     )
 
-    # ==================================================================
-    # VALIDADORES GLOBALES
-    # ==================================================================
 
     @model_validator(mode="after")
     def _validate_all(self) -> "LanguageDetectionResult":
-        # (A) sha 64hex lower consistency
         src = str(self.source_preprocessed_sha256).strip().lower()
         vad = str(self.vad_reference_sha256).strip().lower()
         if src != vad:
@@ -153,19 +122,16 @@ class LanguageDetectionResult(BaseModel):
         object.__setattr__(self, "source_preprocessed_sha256", src)
         object.__setattr__(self, "vad_reference_sha256", vad)
 
-        # (B) analyzed <= total
         if int(self.analyzed_duration_ms) > int(self.total_duration_ms):
             raise ValueError(
                 f"analyzed_duration_ms {self.analyzed_duration_ms} > total_duration_ms {self.total_duration_ms}"
             )
 
-        # (C) alternatives sort DESC + ranks únicos + <top_k (de thresholds)
         validated_alts = validate_alternatives_sorted_desc(
             tuple(self.alternatives), int(self.thresholds.top_k)
         )
         object.__setattr__(self, "alternatives", validated_alts)
 
-        # (D) strategy silent => code=und, conf=0, alternatives=empty, intervals_considered=0, analyzed=0
         if str(self.analyzed_strategy) == LID_STRATEGY_SILENT_FALLBACK:
             if str(self.language_code) != "und":
                 raise ValueError(
@@ -188,7 +154,6 @@ class LanguageDetectionResult(BaseModel):
                     "silent_fallback_none num_speech_intervals_considered debe ser 0."
                 )
 
-        # (E) strategy voice-only => intervals >=1
         if (
             str(self.analyzed_strategy) == LID_STRATEGY_VOICE_ONLY
             and int(self.num_speech_intervals_considered) <= 0
@@ -198,14 +163,12 @@ class LanguageDetectionResult(BaseModel):
                 "only_voice_intervals requiere num_speech_intervals_considered >= 1 si analyzed>0."
             )
 
-        # (F) analysis_metadata sin bytes/tensores prohibidos (solo chequeo superficial)
         for k, v in self.analysis_metadata.items():
             if isinstance(v, (bytes, bytearray, memoryview)):
                 raise ValueError(
                     f"analysis_metadata[{k!r}] contiene bytes/prohibido. Sin raw audio/logits."
                 )
 
-        # (G) language_name strip
         object.__setattr__(self, "language_name", str(self.language_name).strip())
 
         return self

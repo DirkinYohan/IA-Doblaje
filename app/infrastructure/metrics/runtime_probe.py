@@ -1,4 +1,3 @@
-"""Medición real de proceso. Sin inventar utilización de GPU si no hay API."""
 from __future__ import annotations
 
 

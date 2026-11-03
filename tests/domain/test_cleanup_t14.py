@@ -1,7 +1,3 @@
-"""Tests unitarios T14 — Domain Entity TempCleanupResult.
-
-Solo DOMAIN, sin filesystem/IA. Pydantic + patrón DUT.
-"""
 from __future__ import annotations
 
 import copy
@@ -23,11 +19,6 @@ def _result(**kw):
     )
     base.update(kw)
     return TempCleanupResult(**base)
-
-
-# =============================================================================
-# TempCleanupResult
-# =============================================================================
 
 
 class TestTempCleanupResult:
@@ -119,12 +110,10 @@ class TestTempCleanupResultAdditional:
         assert r.errors == ()
 
     def test_cleaned_requires_success_false_ok(self):
-        # cleaned True pero success False con errores → válido (parcial)
         r = _result(cleaned=True, removed_paths=("x",), errors=("e",), success=False)
         assert r.cleaned is True
         assert r.success is False
 
     def test_no_path_handles(self):
-        # removed_paths debe ser strings, no Path
         r = _result(removed_paths=("job-12345678/sub",))
         assert isinstance(r.removed_paths[0], str)

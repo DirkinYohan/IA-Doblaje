@@ -1,12 +1,3 @@
-"""E2E del flujo progresivo: Producir, tiempo real, pausa y adelantar.
-
-Cubre los requisitos que no se pueden comprobar con dobles:
-* el audio del original nunca se toca,
-* el trabajo arranca con «Producir», no al subir,
-* los subtítulos se publican antes de terminar el procesamiento,
-* el procesamiento NO se detiene cuando el reproductor está pausado,
-* adelantar funciona en zonas procesadas y no procesadas.
-"""
 from __future__ import annotations
 
 import os
@@ -22,7 +13,6 @@ from tests.fixtures.accounts import sign_up
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 FFMPEG = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe"
-# `IA_E2E_SOURCE` permite usar cualquier vídeo local con voz en inglés.
 SOURCE = Path(
     os.environ.get("IA_E2E_SOURCE")
     or "data/input/a29937b8-f0ee-40d7-b0d0-2ff63fde9d9d/"
@@ -32,7 +22,6 @@ SOURCE = Path(
 
 @pytest.fixture(scope="module")
 def clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Vídeo real de 40 s con audio, recodificado para ser autocontenido."""
     if not SOURCE.is_file():
         pytest.skip("falta el vídeo de origen para la prueba E2E progresiva")
     binary = str(FFMPEG) if FFMPEG.is_file() else "ffmpeg"
@@ -49,11 +38,6 @@ def clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="module")
 def worker_client(tmp_path_factory: pytest.TempPathFactory):
-    """App real CON worker activo y almacenamiento aislado.
-
-    Se reinicia la cola antes de crear la app: otro módulo de pruebas puede
-    haber dejado el worker apagado o apuntando a una base de datos distinta.
-    """
     from app.presentation.api import worker
 
     worker.reset()
@@ -72,13 +56,6 @@ def worker_client(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def prepared(worker_client: TestClient, clip: Path) -> dict[str, str]:
-    """Sube el clip y pulsa «Producir». Devuelve ids y el estado inicial.
-
-    Se comprueba ANTES que el traductor (M2M100 418M) se puede cargar: con la
-    suite completa en paralelo el proceso puede quedarse sin memoria. Si no
-    cabe, el motor lo reporta como PARTIAL con la causa (no lo oculta), y estas
-    pruebas se saltan en lugar de dar un falso fallo.
-    """
     try:
         from app.core.config import get_settings
         from app.domain.value_objects.translation import TranslationLanguageCode
@@ -174,18 +151,8 @@ class TestProgressiveDelivery:
     def test_llegan_cues_antes_de_terminar_y_el_worker_no_se_detiene(
         self, worker_client: TestClient, prepared: dict[str, str]
     ) -> None:
-        """El corazón del requisito: subtítulos mientras el worker sigue.
-
-        Se comprueba con EVIDENCIA PERSISTIDA, no con una carrera de tiempos:
-        el historial registra `CUES_READY` una vez por ventana, antes de
-        `FINALIZING`. Si todo se guardara al final habría una sola entrada.
-        Además se vigila que el trabajo avance sin que nadie reproduzca el
-        vídeo: el servidor no recibe señal alguna del reproductor, así que
-        pausarlo no puede detenerlo.
-        """
         project_id = prepared["project_id"]
         job_id = prepared["job_id"]
-        # Observación pasiva: equivale a tener el reproductor pausado.
         first = worker_client.get(f"/api/jobs/{job_id}").json()
         baseline_progress = int(first["progress"])
         baseline_covered = int(first["last_cue_ms"])
@@ -217,10 +184,7 @@ class TestProgressiveDelivery:
         cue_windows = stages.count("CUES_READY")
         assert cue_windows >= 1, f"no hay entrega de subtítulos en el historial: {stages}"
         assert "FINALIZING" in stages
-        # El cierre es COMPLETED si todo salió bien, o PARTIAL si algo falló
-        # (p. ej. la traducción): nunca se disfraza de éxito total.
         assert stages[-1] in {"COMPLETED", "PARTIAL", "FAILED"}, stages
-        # Cada ventana publica: la entrega ocurre ANTES del cierre.
         assert stages.index("CUES_READY") < stages.index("FINALIZING"), (
             f"los subtítulos se cerraron antes de publicarse: {stages}"
         )
@@ -256,7 +220,6 @@ class TestProgressiveDelivery:
     def test_pistas_con_contrato_de_sincronizacion(
         self, worker_client: TestClient, prepared: dict[str, str]
     ) -> None:
-        """Cada pista identifica proyecto, idioma y segmentos en ms del vídeo."""
         project_id = prepared["project_id"]
         tracks = worker_client.get(f"/api/subtitles/{project_id}").json()["subtitles"]
         by_language = {track["language"]: track for track in tracks}
@@ -265,7 +228,6 @@ class TestProgressiveDelivery:
         for language, track in by_language.items():
             assert track["project_id"] == project_id
             assert track["status"] == "complete"
-            # Ventanas en silencio incluidas: la pista cubre el clip entero.
             assert track["covered_ms"] >= clip_ms - 1_000, (language, track["covered_ms"])
             ids = [cue["id"] for cue in track["cues"]]
             assert len(ids) == len(set(ids)), "identificadores únicos por segmento"
@@ -274,7 +236,6 @@ class TestProgressiveDelivery:
                 assert cue["project_id"] == project_id
                 assert isinstance(cue["start_ms"], int) and isinstance(cue["end_ms"], int)
                 assert 0 <= cue["start_ms"] < cue["end_ms"] <= clip_ms + 1_000
-        # La traducción conserva los tiempos del audio original, segmento a segmento.
         source_times = [(c["start_ms"], c["end_ms"]) for c in by_language["en"]["cues"]]
         target_times = [(c["start_ms"], c["end_ms"]) for c in by_language["es"]["cues"]]
         assert target_times == source_times
@@ -282,7 +243,6 @@ class TestProgressiveDelivery:
     def test_consulta_por_rango_para_zonas_procesadas_y_no_procesadas(
         self, worker_client: TestClient, prepared: dict[str, str]
     ) -> None:
-        """Adelantar debe funcionar: el tramo pedido se devuelve bien acotado."""
         project_id = prepared["project_id"]
         everything = worker_client.get(
             f"/api/subtitles/{project_id}/cues", params={"lang": "es"}
@@ -297,7 +257,6 @@ class TestProgressiveDelivery:
         assert len(first_half["cues"]) < total
         assert all(int(cue["start_ms"]) < 10_000 for cue in first_half["cues"])
 
-        # Una zona sin voz devuelve lista vacía, no un error.
         empty_zone = worker_client.get(
             f"/api/subtitles/{project_id}/cues",
             params={"lang": "es", "start_ms": 10**9, "end_ms": 10**9 + 1000},
@@ -319,13 +278,11 @@ class TestRealtimeEvents:
     def test_websocket_reentrega_el_estado_y_los_cues(
         self, worker_client: TestClient, prepared: dict[str, str]
     ) -> None:
-        """Un cliente que se conecta tarde recibe el estado y puede resincronizar."""
         job_id = prepared["job_id"]
         with worker_client.websocket_connect(f"/api/jobs/{job_id}/events") as socket:
             first = socket.receive_json()
             assert first["type"] in {"snapshot", "processing_progress", "subtitle_created",
                                      "processing_finished", "processing_completed"}, first
-            # El snapshot siempre lleva el estado persistido.
             if first["type"] == "snapshot":
                 assert "progress" in first and "status" in first
                 assert "stage_history" in first
@@ -348,7 +305,6 @@ class TestRealtimeEvents:
         ) as socket:
             message = socket.receive_json()
             assert message["type"] == "error"
-        # Se recupera la sesión original para no romper el resto de la clase.
         worker_client.post("/api/auth/logout")
         worker_client.post(
             "/api/auth/login",
@@ -371,7 +327,6 @@ class TestExport:
     def test_media_sigue_disponible_tras_exportar(
         self, worker_client: TestClient, prepared: dict[str, str]
     ) -> None:
-        """El vídeo con su audio sigue sirviéndose después de todo el flujo."""
         media = worker_client.get(f"/api/videos/{prepared['project_id']}/media")
         assert media.status_code == 200
         assert len(media.content) > 10_000

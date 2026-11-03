@@ -1,8 +1,3 @@
-"""UseCase RunSpeakerDiarizationUseCase — Capa APPLICATION (T08 Step 08 Diarization).
-
-Dependency Injection via constructor. Solo depende de Domain Ports/Entities.
-NO importa torch/pyannote/speechbrain/numpy (clean architecture).
-"""
 from __future__ import annotations
 
 import time
@@ -31,17 +26,8 @@ log = get_logger("app.application.use_cases.run_diarization")
 
 @dataclass(frozen=True, slots=True)
 class RunSpeakerDiarizationUseCase:
-    """Orquesta Step 08 Speaker Diarization. Inmutable. DI via constructor.
-
-    Input: (PreprocessedAudio, VadResult) — ambos frozen, NO mutados.
-    Output: DiarizationResult frozen con chain of custody T03+T04.
-    """
-
     diarizer: SpeakerDiarizerPort
 
-    # ------------------------------------------------------------------
-    # PUBLIC
-    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -51,7 +37,6 @@ class RunSpeakerDiarizationUseCase:
         thresholds: DiarizationThresholds | None = None,
         job_id: str | None = None,
     ) -> DiarizationResult:
-        # 1) None inputs
         if preprocessed_audio is None:
             raise ValidationFailedError("RunSpeakerDiarizationUseCase: preprocessed_audio es None")
         if vad_result is None:
@@ -60,7 +45,6 @@ class RunSpeakerDiarizationUseCase:
         bind_context(job_id=job_id, phase="DIARIZATION", model=MODEL_LABEL_PYANNOTE_DIARIZATION_V1_LITERAL)
         t0 = time.perf_counter()
 
-        # 2) Thresholds defaults
         effective_thresholds: DiarizationThresholds
         if thresholds is None:
             effective_thresholds = DiarizationThresholds()
@@ -71,7 +55,6 @@ class RunSpeakerDiarizationUseCase:
                 )
             effective_thresholds = thresholds
 
-        # 3) Chain of Custody T03 ↔ T04
         prep_sha = str(preprocessed_audio.sha256).lower()
         vad_sha = str(vad_result.source_preprocessed_sha256).lower()
         if prep_sha != vad_sha:
@@ -89,7 +72,6 @@ class RunSpeakerDiarizationUseCase:
             },
         )
 
-        # 4) Silent fallback (sin cargar modelo ni invocar al adapter)
         if int(vad_result.num_intervals) == 0:
             if not effective_thresholds.allow_silent_fallback:
                 raise ValidationFailedError(
@@ -101,7 +83,6 @@ class RunSpeakerDiarizationUseCase:
                 job_id=job_id,
             )
 
-        # 5) Delegar al Port (Dependency Inversion) — solo cuando hay voz.
         try:
             result: DiarizationResult = self.diarizer.diarize(
                 preprocessed_audio=preprocessed_audio,
@@ -117,7 +98,6 @@ class RunSpeakerDiarizationUseCase:
                 f"run_diarization unexpected error: {exc!r}"
             ) from exc
 
-        # 6) Post-condiciones
         if not isinstance(result, DiarizationResult):
             raise ValidationFailedError(
                 "RunSpeakerDiarizationUseCase: adapter devolvió tipo no DiarizationResult"
@@ -152,9 +132,6 @@ class RunSpeakerDiarizationUseCase:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # HELPERS INTERNOS
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _build_silent_fallback(
@@ -163,7 +140,6 @@ class RunSpeakerDiarizationUseCase:
         vad_result: VadResult,
         job_id: str | None,
     ) -> DiarizationResult:
-        """VAD sin voz → DiarizationResult vacío. NO carga modelo."""
         total_ms = int(round(float(preprocessed_audio.duration_sec) * 1000.0))
         return DiarizationResult(
             source_preprocessed_sha256=str(preprocessed_audio.sha256),

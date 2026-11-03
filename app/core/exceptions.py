@@ -1,42 +1,9 @@
-"""Jerarquia de excepciones custom.
-
-Implementacion MINIMA T01: solo estructura de clases.
-Los mensajes y datos especificos se afinan en T02 al implementar cada modulo.
-
-Regla:
-    EngineBaseError (abstracta)
-    ├── ConfigurationError
-    ├── DeviceDetectionError
-    ├── MediaError (base multimedia)
-    │   ├── UnsupportedMediaError
-    │   ├── MediaTooLargeError
-    │   ├── InvalidMediaPathError
-    │   └── MediaProcessingError
-    │       └── AudioExtractionError
-    ├── ModelError (base modelos IA)
-    │   ├── ModelLoadError
-    │   ├── ModelAdapterNotRegistered
-    │   ├── ASRProcessingError
-    │   ├── DiarizationError
-    │   ├── VADProcessingError
-    │   └── LanguageDetectionError
-    ├── PipelineError
-    │   ├── AlignmentError
-    │   ├── QualityFailedError
-    │   ├── ValidationFailedError
-    │   └── ProfileDowngradeRequired  (PUNTO 2: requiere decision usuario)
-    └── StorageError
-        └── OutputWriteError
-"""
-
 from __future__ import annotations
 
 from typing import Any
 
 
 class EngineBaseError(Exception):
-    """Base exception abstracta. No instanciar directamente."""
-
     code: str = "ENGINE_ERROR"
     status_code: int = 500
 
@@ -56,9 +23,6 @@ class EngineBaseError(Exception):
         return f"[{self.code}] {self.message}"
 
 
-# -----------------------------------------------------------------------------
-# CONFIGURACION / DISPOSITIVO
-# -----------------------------------------------------------------------------
 class ConfigurationError(EngineBaseError):
     code = "CONFIG_ERROR"
     status_code = 500
@@ -69,9 +33,6 @@ class DeviceDetectionError(EngineBaseError):
     status_code = 500
 
 
-# -----------------------------------------------------------------------------
-# MEDIA / AUDIO
-# -----------------------------------------------------------------------------
 class MediaError(EngineBaseError):
     code = "MEDIA_ERROR"
 
@@ -100,9 +61,6 @@ class AudioExtractionError(MediaProcessingError):
     code = "AUDIO_EXTRACTION_FAILED"
 
 
-# -----------------------------------------------------------------------------
-# MODELOS / IA
-# -----------------------------------------------------------------------------
 class ModelError(EngineBaseError):
     code = "MODEL_ERROR"
     status_code = 500
@@ -134,21 +92,14 @@ class LanguageDetectionError(ModelError):
 
 
 class TranslationError(ModelError):
-    """Error de traducción T15 (motor/modelo falló o contrato violado)."""
-
     code = "TRANSLATION_FAILED"
 
 
 class UnsupportedLanguageError(TranslationError):
-    """Idioma no soportado T15 (fuera de los 8 oficiales o 'und')."""
-
     code = "UNSUPPORTED_LANGUAGE"
     status_code = 422
 
 
-# -----------------------------------------------------------------------------
-# PIPELINE
-# -----------------------------------------------------------------------------
 class PipelineError(EngineBaseError):
     code = "PIPELINE_ERROR"
 
@@ -167,21 +118,11 @@ class ValidationFailedError(PipelineError):
 
 
 class PipelineCancelled(PipelineError):
-    """El usuario canceló el job entre pasos."""
-
     code = "PIPELINE_CANCELLED"
     status_code = 409
 
 
 class ProfileDowngradeRequired(PipelineError):
-    """Excepcion PUNTO 2.
-
-    Se lanza cuando el perfil solicitado NO puede ejecutarse por falta
-    de recursos (ej: QUALITY pide 8GB VRAM, usuario tiene 4GB).
-    NO debe auto-resolverse. El CLI debe preguntar al usuario o
-    respetar la configuracion GPU_AUTO_DOWNGRADE_ENABLED explícita.
-    """
-
     code = "PROFILE_DOWNGRADE_REQUIRED"
     status_code = 412
 
@@ -212,9 +153,6 @@ class ProfileDowngradeRequired(PipelineError):
         self.alternatives = alternatives
 
 
-# -----------------------------------------------------------------------------
-# STORAGE
-# -----------------------------------------------------------------------------
 class StorageError(EngineBaseError):
     code = "STORAGE_ERROR"
 

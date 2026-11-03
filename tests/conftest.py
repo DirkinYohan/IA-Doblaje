@@ -1,9 +1,3 @@
-"""Fixtures globales de pytest.
-
-T01: Configuracion basica y paths para tests.
-No hay fixtures de modelos IA, audio sintetico, etc. esos se agregan en T04+.
-"""
-
 from __future__ import annotations
 
 import os
@@ -14,9 +8,6 @@ from pathlib import Path
 import pytest
 
 
-# -----------------------------------------------------------------------------
-# PATHS GLOBALES
-# -----------------------------------------------------------------------------
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 TESTS_DIR: Path = PROJECT_ROOT / "tests"
 FIXTURES_DIR: Path = TESTS_DIR / "fixtures"
@@ -27,33 +18,18 @@ DATA_TEMP_DIR: Path = PROJECT_ROOT / "data" / "temporary"
 MODELS_DIR: Path = PROJECT_ROOT / "models"
 
 
-# -----------------------------------------------------------------------------
-# PYTEST HOOKS
-# -----------------------------------------------------------------------------
 def pytest_configure(config: pytest.Config) -> None:
-    """Registra markers y paths."""
-    # Asegurar que el project root este en sys.path para imports editable
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(PROJECT_ROOT))
 
-    # Las pruebas SIEMPRE contra SQLite, aunque el proyecto tenga configurada
-    # una base PostgreSQL en `.env`. Sin esto, correr la suite escribiría en la
-    # base real: crearía usuarios y borraría tablas de producción.
     os.environ["IA_DB_BACKEND"] = "sqlite"
     os.environ.pop("IA_DATABASE_URL", None)
     os.environ.pop("DATABASE_URL", None)
-    # Y tampoco deben subir archivos al bucket real del almacenamiento.
     os.environ["IA_STORAGE_BACKEND"] = "local"
-    # Ni enviar correos reales por Brevo: vacía (no ausente), porque la carga
-    # del `.env` no pisa lo que ya existe y así nunca trae la clave real.
     os.environ["BREVO_API_KEY"] = ""
-    # Cargar Whisper y M2M100 en cada prueba haría la suite lentísima.
     os.environ["IA_PRELOAD_MODELS"] = "0"
-    # Ni las pruebas de la API cargan Whisper/M2M100 al listar proyectos.
     os.environ["IA_LIVE_PRELOAD"] = "0"
 
-    # Las rutas de datos también van a un directorio de pruebas: sin esto la
-    # suite deja vídeos y miniaturas en data/input del proyecto.
     sandbox = PROJECT_ROOT / "tests" / ".sandbox"
     if sandbox.exists():
         shutil.rmtree(sandbox, ignore_errors=True)
@@ -61,11 +37,9 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ["DATA_OUTPUT_DIR"] = str(sandbox / "output")
     os.environ["DATA_TEMP_DIR"] = str(sandbox / "temporary")
 
-    # Crear directorios de trabajo si no existen
     for directory in (DATA_INPUT_DIR, DATA_OUTPUT_DIR, DATA_TEMP_DIR, MODELS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
-    # Guardar paths para uso en tests
     config.stash["project_root"] = PROJECT_ROOT
     config.stash["data_dirs"] = {
         "input": DATA_INPUT_DIR,
@@ -75,7 +49,6 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Ordena tests: unit first, integration last."""
     _ORDER = {
         "tests/domain": 0,
         "tests/application": 1,
@@ -93,9 +66,6 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     items.sort(key=_sort_key)
 
 
-# -----------------------------------------------------------------------------
-# FIXTURES: PATHS
-# -----------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def project_root() -> Path:
     return PROJECT_ROOT
@@ -123,10 +93,6 @@ def data_output_dir() -> Path:
 
 @pytest.fixture()
 def isolated_temp_dir(tmp_path: Path) -> Path:
-    """Directorio temporal aislado por test.
-
-    Preferible sobre DATA_TEMP_DIR para evitar colisiones.
-    """
     d = tmp_path / f"job_{os.getpid()}"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -134,9 +100,7 @@ def isolated_temp_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def monkeypatch_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    """Helper para limpiar variables de entorno sensibles en tests."""
     for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "CUDA_VISIBLE_DEVICES"):
         monkeypatch.delenv(key, raising=False)
-    # Asegurar no se usan GPUs reales en unit tests
     monkeypatch.setenv("FORCE_CPU", "true")
     return monkeypatch

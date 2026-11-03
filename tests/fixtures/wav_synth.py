@@ -1,7 +1,3 @@
-"""Fixtures sintéticas WAV — stdlib `wave` + `struct` solamente.
-
-0 numpy, 0 soundfile, 0 scipy, 0 torch, 0 externas.
-"""
 from __future__ import annotations
 
 import math
@@ -20,20 +16,6 @@ def create_synthetic_wav_pcm16(
     freq_hz: float = 440.0,
     amplitude: float = 0.7,
 ) -> Tuple[Path, int, int, int, float]:
-    """Crea un archivo WAV PCM 16-bit little-endian con una onda senoidal pura.
-
-    Args:
-        output_path: Path absoluto donde escribir el WAV.
-        duration_sec: duración segundos.
-        sample_rate_hz: 8000–96000 (16000 default).
-        channels: 1 mono | 2 stereo.
-        freq_hz: Frecuencia tono (440Hz por defecto: A4).
-        amplitude: 0.0–1.0 (default 0.7 para evitar clipping cuando peak norm).
-
-    Returns:
-        (path, n_samples_total_written, sample_rate_hz, channels, duration_sec)
-    """
-    # Input validation básicos
     if not (0.01 <= float(duration_sec) <= 60.0):
         raise ValueError(f"duration_sec fuera [0.01,60.0]: {duration_sec}")
     if not (8000 <= int(sample_rate_hz) <= 96000):
@@ -56,12 +38,10 @@ def create_synthetic_wav_pcm16(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Escribir WAV con wave stdlib
     with wave.open(str(output_path), "wb") as wf:
         wf.setnchannels(ch)
-        wf.setsampwidth(2)  # 16-bit = 2 bytes PCM little-endian
+        wf.setsampwidth(2)
         wf.setframerate(sr)
-        # Escribir en chunks para no agotar memoria (aunque duration pequeña)
         chunk = 1024
         two_pi_f_over_sr = 2.0 * math.pi * freq / float(sr)
         max_int = 32767
@@ -72,7 +52,6 @@ def create_synthetic_wav_pcm16(
             for i in range(written, end):
                 sample = math.sin(two_pi_f_over_sr * float(i))
                 int16_val = int(round(max_int * amp * sample))
-                # clamp just in case math sin round issues
                 if int16_val > max_int:
                     int16_val = max_int
                 if int16_val < -32768:
@@ -81,7 +60,6 @@ def create_synthetic_wav_pcm16(
                 if ch == 1:
                     frames.append(frame_bytes)
                 else:
-                    # Stereo: mismo tono en ambos canales (test simple)
                     frames.append(frame_bytes)
                     frames.append(frame_bytes)
             written = end

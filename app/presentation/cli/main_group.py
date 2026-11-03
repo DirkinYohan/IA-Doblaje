@@ -1,14 +1,3 @@
-"""CLI entrypoint principal basado en Typer.
-
-T01: Implementacion MINIMA:
-    - Comando ``--version`` (muestra fase + version)
-    - Comando ``--help`` funcional
-    - Sub-comandos placeholders (``analyze``, ``validate``, ``diagnose``)
-      con mensaje informativo "implementado en siguientes tareas".
-
-En Tareas sucesivas se ira completando cada comando con la logica real.
-"""
-
 from __future__ import annotations
 
 import os
@@ -73,14 +62,6 @@ def main_callback(
         help="Salida detallada.",
     ),
 ) -> None:
-    """IA Doblaje Engine - Motor profesional de analisis de audio para doblaje.
-
-    \b
-    Estructura de comandos disponibles:
-    - analyze   : Analizar un archivo multimedia (implementacion progresiva T04-T11)
-    - validate  : Validar un JSON de analisis existente
-    - diagnose  : Diagnostico del sistema (CPU/GPU/FFmpeg/PyTorch)
-    """
     if ctx.invoked_subcommand is None:
         _print_banner()
         console.print(
@@ -102,16 +83,10 @@ def diagnose_cmd(
         help="Mostrar informacion detallada del entorno.",
     ),
 ) -> None:
-    """Diagnostico rapido del sistema: Python, PyTorch, GPU, FFmpeg, paths.
-
-    T01: Muestra informacion basica del entorno y un resumen de salud.
-    T02: Integrado con AppSettings reales + DeviceDetector + PathManager.
-    """
     _print_banner()
     console.print(Panel.fit("[bold blue]DIAGNOSTICO DEL SISTEMA[/bold blue]", border_style="blue"))
     console.print()
 
-    # --- Cargar AppSettings (si esta disponible, T02) ---
     settings = None
     try:
         from app.core.config import get_settings, clear_settings_cache
@@ -120,7 +95,6 @@ def diagnose_cmd(
     except Exception:  # noqa: BLE001 - defensivo
         settings = None
 
-    # --- DeviceDetector (T02) ---
     dev_info = None
     try:
         from app.core.device import DeviceDetector
@@ -133,7 +107,6 @@ def diagnose_cmd(
     except Exception:  # noqa: BLE001
         dev_info = None
 
-    # --- Paths (T02) ---
     try:
         from app.core.paths import PathManager
         pm = PathManager.from_settings(settings)
@@ -166,7 +139,6 @@ def diagnose_cmd(
         )
     console.print()
 
-    # --- Configuracion del motor via AppSettings ---
     if settings is not None:
         try:
             processing = settings.processing
@@ -193,7 +165,6 @@ def diagnose_cmd(
             pass
         console.print()
 
-    # --- GPU / CUDA / VRAM ---
     try:
         import torch  # noqa: WPS433
         torch_ok = True
@@ -220,7 +191,6 @@ def diagnose_cmd(
                 f"{gpu.total_vram_gb:.1f} GB totales "
                 f"(usada {gpu.used_vram_gb:.1f} GB)"
             )
-            # Politica Punto 2: sugerir perfiles compatibles
             try:
                 avail = gpu.available_vram_gb
                 from app.core.constants import QualityProfile
@@ -248,7 +218,6 @@ def diagnose_cmd(
                 console.print(f"  • [dim]nota: {n}[/dim]")
     console.print()
 
-    # --- Paths ---
     if dirs is not None and pm is not None:
         console.print("[bold]Directorios (PathManager):[/bold]")
         console.print(f"  • data/input     : {pm.data_input_dir}")
@@ -304,16 +273,11 @@ def analyze_cmd(
         help="Guardar resultados incluso si Quality Analysis reporta status=failed.",
     ),
 ) -> None:
-    """Analizar un archivo multimedia y generar los JSON estructurados.
-
-    Ejecuta el pipeline completo T01 → T14 (análisis de audio).
-    """
     from app.application.pipeline.analyze_audio_pipeline import build_pipeline
     from app.application.pipeline.preflight import run_preflight
 
     _print_banner()
 
-    # 1) Validar que el archivo existe
     from pathlib import Path as _Path
 
     input_p = _Path(input_path)
@@ -324,7 +288,6 @@ def analyze_cmd(
         console.print(f"[red][FALLO][/red] No es un archivo regular: {input_path}")
         raise typer.Exit(code=2)
 
-    # 2) Preflight (solo lectura)
     items = run_preflight()
     failed = [it for it in items if not it.ok]
     console.print(Panel.fit("[bold blue]PRECHECK DE PREPARACIÓN[/bold blue]", border_style="blue"))
@@ -337,7 +300,6 @@ def analyze_cmd(
         console.print("[yellow]No se puede iniciar el pipeline: faltan dependencias/modelos.[/yellow]")
         raise typer.Exit(code=3)
 
-    # 3) Construir y ejecutar el pipeline
     from app.core.config import get_settings
     from app.core.constants import DeviceType
     from app.core.constants import QualityProfile
@@ -407,9 +369,6 @@ def validate_cmd(
         help="Modo estricto (marca warnings como errores).",
     ),
 ) -> None:
-    """Validar un JSON de analisis existente contra el schema.
-
-    """
     _print_banner()
     from pathlib import Path as _Path
     import json

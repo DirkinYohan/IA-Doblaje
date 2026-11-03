@@ -1,16 +1,3 @@
-"""Exportación SRT, VTT y ASS/SSA. UTF-8. Sin lógica de segmentación.
-
-Los archivos deben poder subirse tal cual a YouTube (que admite SRT y WebVTT,
-no ASS). Por eso, antes de escribir cualquier formato, la pista se normaliza:
-
-* orden por tiempo de inicio;
-* fuera los cues vacíos o sin duración (un bloque SRT sin texto rompe el
-  archivo: la línea en blanco cierra el bloque antes de tiempo);
-* sin líneas en blanco DENTRO de un cue, por el mismo motivo;
-* numeración SRT consecutiva desde 1, sea cual sea el índice guardado.
-
-WebVTT además escapa `&`, `<` y `>` y no admite `-->` dentro del texto.
-"""
 from __future__ import annotations
 
 import re
@@ -38,7 +25,6 @@ def _hms(ms: int, *, separator: str, centis: bool = False) -> str:
 
 
 def _clean(cues: Iterable[object]) -> list[_Clean]:
-    """Pista lista para escribir: ordenada, sin vacíos ni líneas en blanco."""
     out: list[_Clean] = []
     for cue in cues:
         text = str(getattr(cue, "text", "") or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -60,7 +46,6 @@ def to_srt(cues: Iterable[object]) -> str:
 
 def _vtt_text(text: str) -> str:
     escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    # «-->» (ya escapado como «--&gt;») no puede aparecer en el texto de un cue.
     return escaped.replace("--&gt;", "→")
 
 
@@ -74,7 +59,6 @@ def to_vtt(cues: Iterable[object]) -> str:
 
 
 def _ass_text(text: str) -> str:
-    # Las llaves abren bloques de estilo en ASS: el texto no puede crearlos.
     return text.replace("{", "(").replace("}", ")").replace("\n", r"\N")
 
 
@@ -126,18 +110,12 @@ def to_ass(cues: Iterable[object], *, language: str = "und") -> str:
 
 
 def to_ass_burn(cues: Iterable[object], *, language: str, width: int, height: int) -> str:
-    """ASS para INCRUSTAR en el vídeo (libass), a la medida de su resolución.
-
-    Igual que el reproductor: texto blanco sobre una caja oscura translúcida
-    (BorderStyle 3), en la parte inferior y proporcional al alto del vídeo.
-    """
     width = max(2, int(width))
     height = max(2, int(height))
     font = max(16, round(height * 0.052))
     pad = max(4, round(font * 0.32))
     margin_v = max(12, round(height * 0.07))
     margin_h = max(16, round(width * 0.08))
-    # BorderStyle 3: la "caja" usa OutlineColour; &H70 ≈ 56 % de opacidad.
     style = (
         f"Style: Default,Arial,{font},&H00FFFFFF,&H000000FF,&H70000000,&H70000000,"
         f"0,0,0,0,100,100,0,0,3,{pad},0,2,{margin_h},{margin_h},{margin_v},1"

@@ -1,15 +1,3 @@
-"""Entidad AlignmentResult Step 09 — ASR ↔ Speaker Alignment. Capa DOMAIN.
-
-Frozen + extra=forbid. Chain of custody 6-SHA:
-  source_preprocessed_sha256 (T03)
-  vad_reference_sha256 (T04)
-  lid_reference_sha256 (T05)
-  asr_reference_sha256 (T06)
-  ts_reference_sha256 (T07)
-  diarization_reference_sha256 (T08)
-
-Sin dependencias infraestructura (no torch/pyannote/numpy).
-"""
 from __future__ import annotations
 
 from typing import Literal
@@ -48,8 +36,6 @@ MODEL_LABEL_ALIGNMENT_V1_LITERAL: Literal[
 
 
 class AlignmentResult(BaseModel):
-    """Resultado Step 09. Inmutable. Chain of Custody 6-SHA."""
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -57,12 +43,10 @@ class AlignmentResult(BaseModel):
         protected_namespaces=(),
     )
 
-    # ---- Step identifiers ------------------------------------------------
     step: PipelineStep = PipelineStep.ASR_SPEAKER_ALIGNMENT
     model_label: Literal["t09:asr-speaker-alignment:v1"] = MODEL_LABEL_ALIGNMENT_V1_LITERAL
     strategy: AlignmentStrategyName
 
-    # ---- Chain of Custody 6-SHA ------------------------------------------
     source_preprocessed_sha256: Sha256Hash
     vad_reference_sha256: Sha256Hash
     lid_reference_sha256: Sha256Hash
@@ -70,12 +54,10 @@ class AlignmentResult(BaseModel):
     ts_reference_sha256: Sha256Hash
     diarization_reference_sha256: Sha256Hash
 
-    # ---- Metadata T03/T07 passthrough ------------------------------------
     total_duration_ms: AlignmentMs
     transcript_language_code: str = Field(min_length=2, max_length=16)
     job_id: str | None = Field(default=None, min_length=8, max_length=128)
 
-    # ---- Outputs ---------------------------------------------------------
     dialogue_segments: tuple[DialogueSegment, ...] = Field(
         default_factory=tuple, description="Segmentos alineados ASC, sin speaker artificial."
     )
@@ -83,13 +65,9 @@ class AlignmentResult(BaseModel):
     num_segments_aligned: int = Field(0, ge=0, description="Segmentos con speaker asignado.")
     num_unassigned: int = Field(0, ge=0, description="Segmentos sin speaker (sin overlap).")
 
-    # ---- Resumen auditoría -----------------------------------------------
     validation_errors: tuple[str, ...] = Field(default_factory=tuple)
     strict_ok: bool = True
 
-    # ======================================================================
-    # VALIDADORES
-    # ======================================================================
 
     @field_validator(
         "source_preprocessed_sha256",
@@ -108,7 +86,6 @@ class AlignmentResult(BaseModel):
 
     @model_validator(mode="after")
     def _validate_all(self) -> "AlignmentResult":
-        # (A) Chain of custody: las 5 primeras referencias deben coincidir con source (T03)
         source = str(self.source_preprocessed_sha256)
         refs = {
             "vad_reference_sha256": str(self.vad_reference_sha256),
@@ -122,7 +99,6 @@ class AlignmentResult(BaseModel):
                     f"Chain of Custody rota T09: {name} != source_preprocessed_sha256."
                 )
 
-        # (B) num consistency
         if self.num_segments_aligned != len(self.dialogue_segments):
             raise ValueError(
                 f"num_segments_aligned={self.num_segments_aligned} != "
@@ -135,7 +111,6 @@ class AlignmentResult(BaseModel):
                 f"num_unassigned({self.num_unassigned})"
             )
 
-        # (C) Orden ASC por segment_index contiguo y por start_ms, sin overlaps
         last_idx = -1
         prev_end = -1
         for i, seg in enumerate(self.dialogue_segments):
@@ -155,7 +130,6 @@ class AlignmentResult(BaseModel):
             last_idx = int(seg.segment_index)
             prev_end = int(seg.end_ms)
 
-        # (D) Silent fallback consistency
         if self.strategy == ALIGNMENT_STRATEGY_SILENT_FALLBACK:
             if len(self.dialogue_segments) != 0:
                 raise ValueError(
@@ -170,7 +144,6 @@ class AlignmentResult(BaseModel):
                     "alignment_silent_fallback requiere num_unassigned == num_segments"
                 )
 
-        # (E) strict_ok implica validation_errors == ()
         if self.strict_ok and self.validation_errors:
             raise ValueError(
                 f"strict_ok=True con validation_errors={list(self.validation_errors)}"

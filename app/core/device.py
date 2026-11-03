@@ -1,25 +1,3 @@
-"""Deteccion de hardware + politica de VRAM (T02.4 implementacion completa).
-
-Clases publicas:
-    GPUInfo
-    DeviceInfo
-    DeviceDetector  (detecta CPU/CUDA/MPS con soft imports de torch)
-
-Funciones publicas:
-    validate_profile_vram_capability()  -> POLITICA CRITICA PUNTO 2
-        NO SILENT DOWNGRADE POR DEFECTO.
-        Solo downgrade si GPU_AUTO_DOWNGRADE_ENABLED=True explicitamente.
-
-Soft imports:
-    - torch: NO a nivel modulo. Importa try/except dentro de metodos.
-    - Si torch no esta instalado: DeviceDetector retorna CPU-only info con
-      torch_available=False, NO lanza excepcion.
-
-Dependency Injection (tests):
-    DeviceDetector(torch_module=fake_torch) permite mockear CUDA/MPS completamente
-    sin tener PyTorch instalado ni GPU real.
-"""
-
 from __future__ import annotations
 
 import os
@@ -32,21 +10,14 @@ from app.core.constants import DeviceType, QualityProfile
 from app.core.exceptions import ProfileDowngradeRequired
 
 
-# =============================================================================
-# Data structures
-# =============================================================================
-
-
 @dataclass(slots=True, frozen=True)
 class GPUInfo:
-    """Info de una GPU detectada. VRAM siempre en MB enteros (0 = desconocido)."""
-
     name: str
     total_vram_mb: int
     available_vram_mb: int
     used_vram_mb: int = 0
     cuda_device_index: int | None = None
-    backend: str = "unknown"  # "cuda" | "mps" | "unknown"
+    backend: str = "unknown"
 
     @property
     def total_vram_gb(self) -> float:
@@ -63,8 +34,6 @@ class GPUInfo:
 
 @dataclass(slots=True)
 class DeviceInfo:
-    """Info completa del sistema de inferencia."""
-
     device_type: DeviceType
     device_name: str
     cpu_cores_logical: int
@@ -92,28 +61,7 @@ class DeviceInfo:
         return self.ram_available_mb / 1024.0
 
 
-# =============================================================================
-# DeviceDetector
-# =============================================================================
-
-
 class DeviceDetector:
-    """Detecta CPU, RAM, CUDA, MPS. Soft import de torch.
-
-    Ejemplo test sin GPU:
-        fake = types.SimpleNamespace()
-        fake.cuda = types.SimpleNamespace(
-            is_available=lambda: True,
-            device_count=lambda: 1,
-            get_device_name=lambda i: "Fake RTX 3060",
-            get_device_properties=lambda i: types.SimpleNamespace(total_memory=12*1024**3),
-            mem_get_info=lambda i: (8*1024**3, 12*1024**3),
-        )
-        fake.backends = types.SimpleNamespace(cudnn=types.SimpleNamespace(version=lambda: 8900))
-        fake.__version__ = "2.5.0+fake"
-        dd = DeviceDetector(torch_module=fake)
-    """
-
     def __init__(
         self,
         *,
@@ -127,10 +75,8 @@ class DeviceDetector:
         self._allow_mps = allow_mps
         self._force_cpu = force_cpu
 
-    # --- helpers internos: importadores soft ---
 
     def _import_torch(self) -> tuple[Any, str | None]:
-        """Retorna (module_or_None, version_or_None). Nunca lanza."""
         if self._torch_injected is not None:
             v = getattr(self._torch_injected, "__version__", None)
             return self._torch_injected, v
@@ -149,7 +95,6 @@ class DeviceDetector:
         except Exception:  # pragma: no cover - import real
             return None
 
-    # --- CPU / RAM via psutil ---
 
     def _cpu_info(self) -> tuple[int, int | None]:
         ps = self._import_psutil()
@@ -176,7 +121,6 @@ class DeviceDetector:
                 pass
         return total_mb, avail_mb
 
-    # --- CUDA via torch ---
 
     def _probe_cuda(self, torch: Any) -> tuple[bool, str | None, list[GPUInfo]]:
         ok = False
@@ -191,7 +135,6 @@ class DeviceDetector:
             ok = False
         if not ok:
             return ok, None, gpus
-        # cuda version
         try:
             ver_fn = getattr(cuda_mod, "version", None)
             if callable(ver_fn):
@@ -207,7 +150,6 @@ class DeviceDetector:
                     _ = v()
         except Exception:  # noqa: S110
             pass
-        # devices
         try:
             count = int(cuda_mod.device_count() or 0)
         except Exception:
@@ -249,7 +191,6 @@ class DeviceDetector:
             ))
         return ok, cuda_version, gpus
 
-    # --- MPS (Apple Silicon) via torch ---
 
     def _probe_mps(self, torch: Any) -> bool:
         if not self._allow_mps:
@@ -266,7 +207,6 @@ class DeviceDetector:
             pass
         return False
 
-    # --- metodo principal ---
 
     def detect(self, preferred: DeviceType = DeviceType.AUTO) -> DeviceInfo:
         notes: list[str] = []
@@ -293,7 +233,6 @@ class DeviceDetector:
 
         primary_gpu: GPUInfo | None = gpus[0] if gpus else None
 
-        # Resolver device final
         if self._force_cpu:
             dt = DeviceType.CPU
         elif preferred == DeviceType.AUTO:
@@ -345,18 +284,11 @@ class DeviceDetector:
         )
 
 
-# =============================================================================
-# Politica CRITICA PUNTO 2 — Validacion VRAM / NO SILENT DOWNGRADE
-# =============================================================================
-
-
 _BYTES_TO_GB_DIV = 1024.0
 
 
 @dataclass(slots=True)
 class VramValidationResult:
-    """Retorno de validate_profile_vram_capability."""
-
     profile_requested: QualityProfile
     profile_applied: QualityProfile
     required_vram_gb: float
@@ -377,7 +309,6 @@ def _build_alternatives(
     profile_vram_cfg: Any,
     device_can_do_accel: bool,
 ) -> list[tuple[str, float | None]]:
-    """Alternativas validas en orden de preferencia."""
     order: list[QualityProfile] = [
         QualityProfile.QUALITY,
         QualityProfile.BALANCED,
@@ -389,7 +320,6 @@ def _build_alternatives(
             continue
         vram = profile_vram_cfg.required_for(p) if hasattr(profile_vram_cfg, "required_for") else None
         result.append((p.value, vram))
-    # Siempre CPU sin VRAM req como ultimo recurso
     result.append(("cpu", None))
     return result
 
@@ -403,23 +333,10 @@ def validate_profile_vram_capability(
     gpu_auto_downgrade_enabled: bool = False,
     logger: Any = None,
 ) -> VramValidationResult:
-    """POLITICA CRITICA PUNTO 2 — NO SILENT DOWNGRADE POR DEFECTO.
-
-    Flujo:
-      1. Si device_type es CPU -> siempre OK (no hay VRAM).
-      2. Calcular VRAM real usable = available_vram - headroom.
-      3. Si VRAM requerido <= VRAM usable -> OK, no downgrade.
-      4. Si VRAM insuficiente:
-         a. gpu_auto_downgrade_enabled=False -> RAISE ProfileDowngradeRequired 412
-         b. gpu_auto_downgrade_enabled=True  -> pick primer perfil que cabe
-                                              -> WARNING en log
-                                              -> downgrade_applied=True
-    """
     req_p = QualityProfile(requested_profile) if isinstance(requested_profile, str) else requested_profile
     required = float(profile_vram_cfg.required_for(req_p)) if hasattr(profile_vram_cfg, "required_for") else 0.0
     alternatives = _build_alternatives(req_p, profile_vram_cfg, device_info.device_type.is_accelerator)
 
-    # Caso simple: CPU no requiere VRAM
     if device_info.device_type == DeviceType.CPU or device_info.primary_gpu is None:
         return VramValidationResult(
             profile_requested=req_p,
@@ -438,7 +355,6 @@ def validate_profile_vram_capability(
     available_after_headroom = max(0.0, float(gpu.available_vram_gb) - headroom_gb)
     device_name = gpu.name
 
-    # Caso 1: cabe sin downgrade
     if required <= available_after_headroom + 1e-6:
         return VramValidationResult(
             profile_requested=req_p,
@@ -452,11 +368,9 @@ def validate_profile_vram_capability(
             alternatives=alternatives,
         )
 
-    # Caso 2: NO CABE. Aplicar politica PUNTO 2
     alternatives_plain = [a[0] for a in alternatives]
 
     if not gpu_auto_downgrade_enabled:
-        # POLITICA CRITICA: raise ProfileDowngradeRequired 412
         raise ProfileDowngradeRequired(
             requested_profile=req_p.value,
             required_vram_gb=required,
@@ -470,28 +384,20 @@ def validate_profile_vram_capability(
             ),
         )
 
-    # gpu_auto_downgrade_enabled=True -> buscar perfil que sí quepa (menor o igual precision, NUNCA upgrade)
-    # Perfiles ordenados por VRAM REQUERIDA ASCENDENTE: PERFORMANCE(3G) < BALANCED(5G) < QUALITY(8G)
     asc_order: list[QualityProfile] = [
         QualityProfile.PERFORMANCE,
         QualityProfile.BALANCED,
         QualityProfile.QUALITY,
     ]
     _rank: dict[QualityProfile, int] = {p: i for i, p in enumerate(asc_order)}
-    # Solo perfiles con precision <= solicitada (rank[perfil] <= rank[req_p])
-    # Ej: req=QUALITY(rank=2) -> [PERF, BAL, QUAL] todos permitidos (downgrade a cualquiera)
-    # Ej: req=BALANCED(rank=1) -> [PERF, BAL] solo (nunca upgrade a QUALITY)
-    # Ej: req=PERFORMANCE(rank=0) -> [PERF] solo
     allowed_asc: list[QualityProfile] = [p for p in asc_order if _rank[p] <= _rank[req_p]]
 
-    picked: QualityProfile = allowed_asc[0]  # default el mas pobre PERO que siempre cabe (PERFORMANCE si permitido)
-    # Iterar DESCENDENTE (mayor calidad primero) para coger el MEJOR perfil que SI cabe
+    picked: QualityProfile = allowed_asc[0]
     for cand in reversed(allowed_asc):
         cand_req = float(profile_vram_cfg.required_for(cand)) if hasattr(profile_vram_cfg, "required_for") else 0.0
         if cand_req <= available_after_headroom + 1e-6:
             picked = cand
             break
-    # Requerido del perfil realmente aplicado
     applied_required = float(profile_vram_cfg.required_for(picked)) if hasattr(profile_vram_cfg, "required_for") else 0.0
 
     if logger is not None:
@@ -521,10 +427,6 @@ def validate_profile_vram_capability(
         alternatives=alternatives,
     )
 
-
-# =============================================================================
-# Export
-# =============================================================================
 
 __all__ = [
     "GPUInfo",

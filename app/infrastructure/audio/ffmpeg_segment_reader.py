@@ -1,17 +1,3 @@
-"""Lectura de audio POR SEGMENTOS directamente del medio original.
-
-El procesamiento progresivo no puede esperar a extraer y normalizar el audio
-completo (loudnorm EBU R128 a dos pasadas, VAD y LID del archivo entero): en un
-vídeo largo eso son minutos sin un solo subtítulo. Este lector decodifica sólo
-el tramo pedido con FFmpeg (`-ss` de entrada, búsqueda precisa) y lo devuelve
-como PCM float32 16 kHz mono.
-
-Expone la misma interfaz que ``ProgressiveAudioWindowReader`` (``read``,
-``duration_ms``, ``total_frames``, ``sample_rate``), así que el
-``ProgressiveTranscriber`` lo usa sin cambios.
-
-El archivo original sólo se LEE: nunca se reescribe ni se copia.
-"""
 from __future__ import annotations
 
 import json
@@ -23,16 +9,12 @@ from typing import Any
 from app.core.exceptions import AudioExtractionError
 
 SAMPLE_RATE = 16000
-# Mismo filtrado básico que el preprocesado del pipeline completo (subpaso A):
-# quita rumble y continua sin la normalización a dos pasadas del archivo entero.
 SEGMENT_FILTER = "highpass=f=80:poles=2"
 
 _NO_WINDOW = 0x08000000 if sys.platform.startswith("win") else 0
 
 
 class FFmpegSegmentReader:
-    """Decodifica tramos ``[start_ms, end_ms)`` del medio bajo demanda."""
-
     def __init__(
         self,
         media_path: str | Path,
@@ -43,8 +25,6 @@ class FFmpegSegmentReader:
         sample_rate: int = SAMPLE_RATE,
         timeout_s: int = 300,
     ) -> None:
-        # Acepta una URL (p. ej. la firmada de Storage): FFmpeg lee por rangos
-        # y no hace falta descargar el archivo entero antes de empezar.
         self.source = str(media_path)
         self.remote = self.source.startswith(("http://", "https://"))
         self.path = None if self.remote else Path(media_path)
@@ -64,7 +44,6 @@ class FFmpegSegmentReader:
         self.total_frames = int(self.duration_ms * self.sample_rate / 1000)
 
     def _probe_duration_ms(self) -> int:
-        """Duración del PRIMER flujo de audio (o del contenedor)."""
         command = [
             self.ffprobe_bin, "-v", "error", "-select_streams", "a:0",
             "-show_entries", "stream=duration:format=duration",
@@ -91,7 +70,6 @@ class FFmpegSegmentReader:
         return 0
 
     def read(self, start_ms: int, end_ms: int) -> Any:
-        """PCM float32 mono [-1, 1] del tramo pedido (recortado a la duración)."""
         import numpy as np
 
         start = max(0, int(start_ms))

@@ -1,8 +1,3 @@
-"""Tests unitarios T08 Infrastructure — Pyannote adapter + Loader.
-
-No requiere pesos reales. Usa mocks de pyannote (Fake pipeline/loader).
-AST security audit incluido.
-"""
 from __future__ import annotations
 
 import ast
@@ -116,11 +111,6 @@ class _FakeLoader:
         return self.pipeline
 
 
-# =============================================================================
-# _normalize_labels (pure)
-# =============================================================================
-
-
 class TestNormalizeLabels:
     def test_valid_labels_kept(self):
         out = _normalize_labels([(0, 100, "SPEAKER_00"), (100, 200, "SPEAKER_01")])
@@ -136,11 +126,6 @@ class TestNormalizeLabels:
 
     def test_empty(self):
         assert _normalize_labels([]) == []
-
-
-# =============================================================================
-# _apply_domain_rules (pure, determinista)
-# =============================================================================
 
 
 def _t(label: str, s: int, e: int) -> _RawTurn:
@@ -239,11 +224,6 @@ class TestDomainRules:
         assert a == b
 
 
-# =============================================================================
-# Loader (errores sin modelos reales)
-# =============================================================================
-
-
 class TestLoader:
     def _loader(self, tmp_path, config: str | None = None):
         models = tmp_path / "models"
@@ -300,11 +280,6 @@ class _Paths:
         self.models_cache_dir = models_dir
 
 
-# =============================================================================
-# Adapter (con mock pipeline)
-# =============================================================================
-
-
 class TestAdapter:
     def test_happy_path(self):
         ann = _FakeAnnotation([(0.0, 1.0, "SPEAKER_00"), (1.0, 2.0, "SPEAKER_01")])
@@ -347,7 +322,7 @@ class TestAdapter:
         adapter = PyannoteSpeakerDiarizationAdapter(model_loader=loader)
         adapter.diarize(_mk_prep(), _mk_vad())
         adapter.diarize(_mk_prep(), _mk_vad())
-        assert loader.load_calls == 1  # cached
+        assert loader.load_calls == 1
 
     def test_determinism_two_runs(self):
         ann = _FakeAnnotation([(0.0, 1.0, "SPEAKER_00"), (1.0, 2.0, "SPEAKER_01")])
@@ -368,11 +343,6 @@ class TestAdapter:
         adapter.diarize(prep, vad)
         assert prep.model_dump() == prep_dump
         assert vad.model_dump() == vad_dump
-
-
-# =============================================================================
-# AST SECURITY AUDIT
-# =============================================================================
 
 
 _ADAPTER_PATH = Path(__file__).resolve().parents[3] / "app" / "infrastructure" / "diarization" / "pyannote_diarization_adapter.py"
@@ -411,15 +381,11 @@ class TestASTAudit:
             assert kw not in txt, f"Identificador prohibido {kw!r} en adapter T08."
 
     def test_adapter_imports_pyannote_only_lazy(self):
-        # El adapter debe importar pyannote solo dentro de funciones (lazy), no a nivel de módulo.
         tree = ast.parse(_ADAPTER_PATH.read_text(encoding="utf-8"))
         module_level_imports: set[str] = set()
         for node in ast.walk(tree):
-            # Solo imports en el cuerpo del módulo (no dentro de funciones)
             if isinstance(node, ast.Import) and isinstance(node, ast.Import):
-                # distingue: los imports lazy están dentro de FunctionDef; aquí solo módulo-level
                 pass
-        # Comprobación: no debe haber import pyannote a nivel de módulo
         for node in ast.parse(_ADAPTER_PATH.read_text(encoding="utf-8")).body:
             if isinstance(node, ast.Import):
                 for a in node.names:

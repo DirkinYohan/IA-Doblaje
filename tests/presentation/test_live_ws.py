@@ -1,8 +1,3 @@
-"""WebSocket de subtítulos progresivos: entrega, reconexión y aislamiento.
-
-Los modelos se sustituyen por dobles LENTOS de tiempos conocidos: así se
-reproduce el caso real (procesamiento en curso) sin cargar Whisper.
-"""
 from __future__ import annotations
 
 import time
@@ -28,8 +23,6 @@ class _Seg:
 
 
 class _SlowModels:
-    """Whisper/M2M simulados: cada pasada tarda, como en CPU."""
-
     def __init__(self, delay: float = 0.15) -> None:
         self.delay = delay
         self.transcribed = 0
@@ -115,7 +108,6 @@ def test_los_primeros_subtitulos_llegan_antes_de_terminar(setup) -> None:
     assert first["id"] == "es:1000:2500"
     seqs = [e["seq"] for e in events]
     assert seqs == sorted(seqs) and len(seqs) == len(set(seqs))
-    # Todos los idiomas pedidos, completos y persistidos.
     tracks = client.get(f"/api/subtitles/{project_id}").json()["subtitles"]
     by_lang = {t["language"]: t for t in tracks}
     assert set(by_lang) == {"en", "es", "fr"}
@@ -132,7 +124,6 @@ def test_reconectar_recupera_lo_perdido_sin_duplicar(setup) -> None:
         socket.receive_json()
         socket.send_json({"type": "position", "time_ms": 0, "language": "es"})
         _collect(socket, lambda e: e["type"] == "cues" and e["language"] == "es" and e["cues"])
-    # Desconectado mientras sigue procesando: no se pierde nada al volver.
     time.sleep(1.0)
     with client.websocket_connect(f"/api/videos/{project_id}/live") as socket:
         snapshot = socket.receive_json()

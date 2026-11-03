@@ -1,11 +1,3 @@
-"""Tests T06 Value Objects ASR — Domain Layer.
-- NO torch / numpy / faster_whisper
-- frozen=True + extra="forbid"
-- D#3 thresholds defaults
-- BeforeValidator anti coerción (bool/str)
-- Determinismo
-"""
-
 from __future__ import annotations
 
 import math
@@ -23,9 +15,6 @@ from app.domain.value_objects.asr import (
 )
 
 
-# =============================================================================
-# Wrappers DUT pattern (igual T04/T05)
-# =============================================================================
 class W_ASRText(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     value: ASRText
@@ -49,9 +38,6 @@ class W_MaxMinutes(BaseModel):
 SHA = "a" * 64
 
 
-# =============================================================================
-# 1 — ASRText (≥6 tests)
-# =============================================================================
 class TestASRText:
     def test_asrtext_happy(self):
         t = W_ASRText(value="Hola mundo. This is a test.")
@@ -85,15 +71,12 @@ class TestASRText:
             W_ASRText(value="x" * 1_000_001)
 
 
-# =============================================================================
-# 2 — TranscriptConfidence (≥5 tests)
-# =============================================================================
 class TestTranscriptConfidence:
     def test_confidence_0_1_range_valid(self):
         W_Confidence(value=0.0)
         W_Confidence(value=0.5)
         W_Confidence(value=1.0)
-        W_Confidence(value=0)  # int ok → coerced float
+        W_Confidence(value=0)
         W_Confidence(value=1)
 
     def test_confidence_rejects_above(self):
@@ -119,9 +102,6 @@ class TestTranscriptConfidence:
             W_Confidence(value="0.5")
 
 
-# =============================================================================
-# 3 — ASRSegmentIndex (≥3 tests)
-# =============================================================================
 class TestASRSegmentIndex:
     def test_index_valid(self):
         assert W_Index(value=0).value == 0
@@ -136,9 +116,6 @@ class TestASRSegmentIndex:
             W_Index(value=True)
 
 
-# =============================================================================
-# 4 — AsrThresholds + AsrMaxDurationMinutes (≥7 tests)
-# =============================================================================
 class TestAsrThresholds:
     def test_defaults(self):
         t = AsrThresholds()
@@ -188,34 +165,24 @@ class TestAsrThresholds:
             W_MaxMinutes(value=True)
 
 
-# =============================================================================
-# 5 — ASRStrategyName Literal (2 tests)
-# =============================================================================
 class TestASRStrategyLiteral:
     def test_known_strategies(self):
         from app.domain.entities.asr import ASRResult
 
-        # Literal strategies oficiales T06
         assert "full_audio" in ASRStrategyName.__args__
         assert "asr_silent_fallback" in ASRStrategyName.__args__
 
     def test_invalid_strategy_rejected(self):
         from app.domain.entities.asr import ASRSegment
         with pytest.raises(ValidationError):
-            # Missing required field "text" → ValidationError
             ASRSegment.model_validate({"segment_index": 0})
         with pytest.raises(ValidationError):
-            # extra="forbid" → extra field rejected
             ASRSegment.model_validate({"segment_index": 0, "text": "ok", "extra_field": 1})
-        # ASRResult strategy literal se prueba en application tests
         s = "full_audio"
         assert s in {"full_audio", "asr_silent_fallback", "only_voice_concat"}
         assert "bad_strategy" not in {"full_audio", "asr_silent_fallback", "only_voice_concat"}
 
 
-# =============================================================================
-# Determinismo (1)
-# =============================================================================
 class TestDeterminism:
     def test_thresholds_deterministic(self):
         a = AsrThresholds(beam_size=3, min_transcript_confidence=0.2, max_audio_duration_minutes=120)

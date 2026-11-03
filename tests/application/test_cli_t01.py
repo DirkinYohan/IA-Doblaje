@@ -1,9 +1,3 @@
-"""Tests minimos CLI (T01).
-
-Verifica que Typer este integrado y los comandos basicos responden.
-No ejecuta pipeline real (eso es T11).
-"""
-
 from __future__ import annotations
 
 from typer.testing import CliRunner
@@ -28,9 +22,7 @@ class TestCLIMinimum:
         from app.presentation.cli.main_group import app
 
         result = cli_runner.invoke(app, [])
-        # No args = ayuda. Typer con no_args_is_help=True retorna exit 0
-        assert result.exit_code in (0, 2)  # 0 ayuda, 2 depende version Typer
-        # Debe mencionar comandos existentes
+        assert result.exit_code in (0, 2)
         text = result.stdout
         assert any(needle in text for needle in ("analyze", "diagnose", "validate", "Usage"))
 
@@ -56,7 +48,6 @@ class TestCLIMinimum:
         from app.presentation.cli.main_group import app
 
         result = cli_runner.invoke(app, ["diagnose"])
-        # Placeholder T01 debe correr sin error fatal aun si PyTorch falta
         assert result.exit_code == 0, (
             f"diagnose fallo con exit={result.exit_code}\n"
             f"stdout: {result.stdout}\n"
@@ -75,11 +66,8 @@ class TestCLIMinimum:
             "--profile", "balanced",
             "--device", "cpu",
         ])
-        # La CLI ya NO es un placeholder: ejecuta el flujo real y, sin
-        # FFmpeg/modelos locales, el preflight falla con exit code 3.
         assert result.exit_code in (3, 5), (
             f"analyze real fallo inesperado. stdout:\n{result.stdout}\n"
             f"exc: {result.exception!r}"
         )
-        # No debe considerarse éxito una ejecución que no pudo procesar el video.
         assert result.exit_code != 0

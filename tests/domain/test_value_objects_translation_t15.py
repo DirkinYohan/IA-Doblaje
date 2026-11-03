@@ -1,7 +1,3 @@
-"""Tests unitarios T15 — Domain Value Objects y Entity Translation.
-
-Solo DOMAIN, sin transformers/torch/infrastructure. Pydantic.
-"""
 from __future__ import annotations
 
 import pytest
@@ -45,11 +41,6 @@ def _seg(idx: int = 0, start: int = 0, end: int = 1000) -> TranslationSegment:
     )
 
 
-# =============================================================================
-# TranslationLanguage / TranslationLanguageCode
-# =============================================================================
-
-
 class TestTranslationLanguage:
     def test_idiomas_oficiales(self):
         codes = {lang.value for lang in TranslationLanguage}
@@ -75,11 +66,6 @@ class TestTranslationLanguage:
         assert _LangDut(v="ES").v == "es"
         assert _LangDut(v=" EN ").v == "en"
         assert _LangDut(v="Es").v == "es"
-
-
-# =============================================================================
-# TranslationSegment
-# =============================================================================
 
 
 class TestTranslationSegment:
@@ -145,11 +131,6 @@ class TestTranslationSegment:
                 translated_text="y", adapted_text="z", extra=1)  # type: ignore[call-arg]
 
 
-# =============================================================================
-# TranslationValidation
-# =============================================================================
-
-
 class TestTranslationValidation:
     def test_ok_default(self):
         v = TranslationValidation()
@@ -171,11 +152,6 @@ class TestTranslationValidation:
                     num_segments_input=1, num_segments_output=1,
                 ),
             )
-
-
-# =============================================================================
-# TranslationResult
-# =============================================================================
 
 
 class TestTranslationResult:
@@ -234,11 +210,6 @@ class TestTranslationResult:
             ),
         )
         assert [s.segment_index for s in r.segments] == [0, 1]
-
-
-# =============================================================================
-# TranslationThresholds
-# =============================================================================
 
 
 class TestTranslationThresholds:

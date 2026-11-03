@@ -1,14 +1,3 @@
-"""Los subtítulos exportados deben poder subirse a YouTube tal cual.
-
-YouTube admite SubRip (.srt) y WebVTT (.vtt) —no ASS—. Se validan los archivos
-con un lector estricto de cada formato, como haría el importador:
-
-* SRT: bloques «número / HH:MM:SS,mmm --> HH:MM:SS,mmm / texto / línea en
-  blanco», numeración consecutiva desde 1, sin bloques vacíos.
-* WebVTT: cabecera «WEBVTT», tiempos «HH:MM:SS.mmm --> HH:MM:SS.mmm», sin
-  «-->» ni «<»/«&» sin escapar en el texto.
-* En ambos: UTF-8, tiempos crecientes y fin posterior al inicio.
-"""
 from __future__ import annotations
 
 import re
@@ -75,8 +64,6 @@ def _check_times(entries: list[tuple[int, int, str]]) -> None:
     assert starts == sorted(starts), "tiempos crecientes"
 
 
-# Una pista "real" tras editar: desordenada, con índices repetidos, un cue
-# vacío, uno sin duración, líneas en blanco, caracteres especiales y > 1 h.
 MESSY = [
     Cue(7, 4_000, 5_500, "Segunda frase"),
     Cue(7, 1_000, 2_500, "Primera\n\nfrase con línea en blanco"),

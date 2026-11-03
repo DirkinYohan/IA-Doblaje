@@ -1,8 +1,3 @@
-"""Tests unitarios T09 Application RunSpeakerAlignmentUseCase.
-
-No requiere IA. Entidades sintéticas T06/T07/T08. Cubre Weighted Overlap
-Majority Vote, tie-break, silent fallback y no-speaker.
-"""
 from __future__ import annotations
 
 import ast
@@ -101,11 +96,6 @@ def _align(ts, asr, diar, thresholds=None):
     return RunSpeakerAlignmentUseCase().run(ts, asr, diar, thresholds=thresholds)
 
 
-# =============================================================================
-# Algoritmo
-# =============================================================================
-
-
 class TestOverlap:
     def test_no_overlap(self):
         ts = _ts_result([_ts_seg(0, 0, 1000)])
@@ -140,7 +130,6 @@ class TestOverlap:
 
 class TestWeightedVote:
     def test_weighted_score_beats_overlap(self):
-        # A: overlap 500, conf 0.8 -> 400 ; B: overlap 600, conf 0.5 -> 300
         ts = _ts_result([_ts_seg(0, 0, 1000)])
         asr = _asr_result(["hola"])
         diar = _diarization([
@@ -151,7 +140,6 @@ class TestWeightedVote:
         assert r.dialogue_segments[0].speaker_label == "SPEAKER_00"
 
     def test_tie_break_by_confidence(self):
-        # A: overlap 500, conf 0.6 ; B: overlap 500, conf 0.9 -> B
         ts = _ts_result([_ts_seg(0, 0, 1000)])
         asr = _asr_result(["hola"])
         diar = _diarization([
@@ -162,7 +150,6 @@ class TestWeightedVote:
         assert r.dialogue_segments[0].speaker_label == "SPEAKER_01"
 
     def test_tie_break_final_earliest_start(self):
-        # mismo weighted_score y misma confidence -> menor start_ms gana
         ts = _ts_result([_ts_seg(0, 0, 1000)])
         asr = _asr_result(["hola"])
         diar = _diarization([
@@ -170,7 +157,6 @@ class TestWeightedVote:
             _turn("SPEAKER_00", 500, 1000, conf=0.7),
         ])
         r = _align(ts, asr, diar)
-        # ambos weighted 350, conf 0.7 -> gana SPEAKER_01 (start 0 < 500)
         assert r.dialogue_segments[0].speaker_label == "SPEAKER_01"
 
 
@@ -216,7 +202,6 @@ class TestTextAndTimestamps:
         assert seg.ts_confidence == 0.8
 
     def test_segment_index_preserved(self):
-        # índices contiguos 0..5 (6 segmentos); el índice 5 se preserva y mapea texto 'f'
         segs = [_ts_seg(i, i * 1000, (i + 1) * 1000) for i in range(6)]
         ts = _ts_result(segs, total_ms=6000)
         asr = _asr_result(["a", "b", "c", "d", "e", "f"])

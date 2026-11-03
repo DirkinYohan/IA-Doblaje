@@ -1,15 +1,3 @@
-"""Configuracion central del motor IA-Doblaje (T02 implementacion completa).
-
-Implementa AppSettings (Pydantic BaseSettings v2) con 9 sub-modelos de configuracion,
-validators estrictos, paths relativos resueltos desde PROJECT_ROOT, SecretStr para HF_TOKEN
-y la politica CRITICA PUNTO 2: GPU_AUTO_DOWNGRADE_ENABLED = False por defecto.
-
-Regla de No Sobreingenieria:
-  - Solo Pydantic + Pydantic-Settings + stdlib.
-  - No dependencias de YAML en este modulo (perfiles YAML se cargan via PathManager T02.6
-    si el usuario lo explicita, pero AppSettings solo lee .env/env vars).
-"""
-
 from __future__ import annotations
 
 import os
@@ -41,14 +29,7 @@ from app.core.constants import (
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
 
-# ---------------------------------------------------------------------------
-# Sub-modelos de configuracion (ordenados por dominio funcional)
-# ---------------------------------------------------------------------------
-
-
 class GeneralConfig(BaseModel):
-    """Variables generales de la aplicacion."""
-
     model_config = ConfigDict(extra="forbid")
 
     app_name: str = Field("IA Doblaje Engine", description="Nombre mostrado en banners/logs.")
@@ -75,11 +56,6 @@ class GeneralConfig(BaseModel):
 
 
 class PathsConfig(BaseModel):
-    """Directorios de trabajo del proyecto.
-
-    Todos los paths relativos se resuelven contra PROJECT_ROOT.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     data_input_dir: Path = Field(Path("data/input"))
@@ -107,8 +83,6 @@ class PathsConfig(BaseModel):
 
 
 class ProcessingConfig(BaseModel):
-    """Perfil + dispositivo + variables de procesamiento general."""
-
     model_config = ConfigDict(extra="forbid")
 
     profile: QualityProfile = Field(
@@ -129,7 +103,7 @@ class ProcessingConfig(BaseModel):
         if isinstance(v, str):
             s = v.strip()
             if not s:
-                return v  # dejar que pydantic maneje vacío (default)
+                return v
             return s.lower()
         return v
 
@@ -145,14 +119,6 @@ class ProcessingConfig(BaseModel):
 
 
 class GPUConfig(BaseModel):
-    """Politicas GPU / VRAM.
-
-    POLITICA CRITICA PUNTO 2:
-      - GPU_AUTO_DOWNGRADE_ENABLED default = False  (NO downgrade silencioso NUNCA).
-      - validate_profile_vram_capability() en DeviceDetector raisea ProfileDowngradeRequired
-        status_code=412 si la GPU no cumple VRAM del perfil.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     cuda_visible_devices: str = Field("")
@@ -174,14 +140,6 @@ class GPUConfig(BaseModel):
 
 
 class ProfileVramConfig(BaseModel):
-    """VRAM minima requerida (GB) por cada perfil de calidad.
-
-    Diseño PUNTO 6:
-      QUALITY = 8 GB   (Whisper-PyTorch large-v3 FP16)
-      BALANCED = 5 GB  (Whisper-PyTorch medium FP16)
-      PERFORMANCE = 3 GB (Faster-Whisper large-v3 int8)
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     quality_required_gb: float = Field(8.0, gt=0)
@@ -198,8 +156,6 @@ class ProfileVramConfig(BaseModel):
 
 
 class FFmpegConfig(BaseModel):
-    """Binarios FFmpeg/FFprobe + audio extraction defaults."""
-
     model_config = ConfigDict(extra="forbid")
 
     ffmpeg_bin: str = Field("ffmpeg")
@@ -216,8 +172,6 @@ class FFmpegConfig(BaseModel):
 
 
 class SafetyConfig(BaseModel):
-    """Validaciones seguridad de entrada multimedia."""
-
     model_config = ConfigDict(extra="forbid")
 
     max_media_size_gb: float = Field(10.0, gt=0.1, description="Tamaño maximo de input en GB.")
@@ -238,8 +192,6 @@ class SafetyConfig(BaseModel):
 
 
 class HFConfig(BaseModel):
-    """HuggingFace Hub (modelos gated pyannote / whisper weights en cache)."""
-
     model_config = ConfigDict(extra="forbid")
 
     hf_token: SecretStr = Field(
@@ -248,11 +200,6 @@ class HFConfig(BaseModel):
 
 
 class QualityConfig(BaseModel):
-    """Quality Analysis Module (implementado T08). Aqui solo thresholds default.
-
-    Reglas QR01-QR11 en docs/QUALITY_RULES.md.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     quality_enabled: bool = Field(True)
@@ -265,8 +212,6 @@ class QualityConfig(BaseModel):
 
 
 class MetricsConfig(BaseModel):
-    """Metricas T09. Flags default para tracking de rendimiento/memoria."""
-
     model_config = ConfigDict(extra="forbid")
 
     metrics_enabled: bool = Field(True)
@@ -277,8 +222,6 @@ class MetricsConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
-    """Formato y archivos de salida JSON por pipeline."""
-
     model_config = ConfigDict(extra="forbid")
 
     output_json_indent: int = Field(2, ge=0, le=8)
@@ -299,8 +242,6 @@ class OutputConfig(BaseModel):
 
 
 class PipelineConfig(BaseModel):
-    """Fail-safes globales del pipeline 14 pasos."""
-
     model_config = ConfigDict(extra="forbid")
 
     pipeline_max_duration_sec: int = Field(
@@ -312,12 +253,6 @@ class PipelineConfig(BaseModel):
 
 
 class TranslationConfig(BaseModel):
-    """Configuración T15 — Translation Engine (Step 15).
-
-    Motor: facebook/m2m100_418M local, offline.
-    Idiomas oficiales: es, en, fr, de, it, pt, ja, zh.
-    """
-
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     enabled: bool = Field(True, description="Activar T15 en el pipeline.")
@@ -372,8 +307,6 @@ class TranslationConfig(BaseModel):
 
 
 class LoggingConfig(BaseModel):
-    """StructLog logging (T02.3 implementacion) thresholds + rotacion."""
-
     model_config = ConfigDict(extra="forbid")
 
     log_dir: Path = Field(Path("data/output/logs"))
@@ -391,26 +324,7 @@ class LoggingConfig(BaseModel):
         return p.resolve()
 
 
-# ---------------------------------------------------------------------------
-# AppSettings principal
-# ---------------------------------------------------------------------------
-
-
 class AppSettings(BaseSettings):
-    """Configuracion central completa del motor.
-
-    Lee variables de:
-      1. Argumentos constructor (tests inyeccion)
-      2. .env file en PROJECT_ROOT si existe
-      3. OS environment variables
-
-    SENSIBLE DEFAULTS:
-      - profile = balanced
-      - device = auto
-      - gpu_auto_downgrade_enabled = False  (POLITICA PUNTO 2 CRITICA)
-      - quality_strict_mode = True
-    """
-
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
@@ -419,7 +333,6 @@ class AppSettings(BaseSettings):
         validate_default=True,
     )
 
-    # ---- sub-configs ----
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     processing: ProcessingConfig = Field(default_factory=ProcessingConfig)
@@ -435,14 +348,10 @@ class AppSettings(BaseSettings):
     translation: TranslationConfig = Field(default_factory=TranslationConfig)
     logging_cfg: LoggingConfig = Field(default_factory=LoggingConfig)
 
-    # ---- backward compat flat validators: algunos usuarios pasan vars flat por env ----
 
     @model_validator(mode="before")
     @classmethod
     def _flatten_env_to_nested(cls, data: dict[str, object]) -> dict[str, object]:
-        """Acepta variables flat estilo PROFILE o DATA_INPUT_DIR y las mapea a nested:
-        ej:  PROFILE=quality  -> processing.profile
-        """
         if not isinstance(data, dict):
             return data
 
@@ -520,18 +429,14 @@ class AppSettings(BaseSettings):
         }
 
         nested: dict[str, dict[str, object]] = {}
-        # Garantizamos lectura de OS env vars flat independientemente de
-        # si SettingsConfigDict las entrega a este validator.
         import os as _os
         for key in list(dict(data).keys()) + list(_os.environ.keys()):
             up = str(key).upper()
             if up in flat_map:
                 group_name, field_name = flat_map[up]
-                # Si ya vino en data y esta nested -> no sobrescribir
                 if isinstance(data.get(group_name), dict):
                     if field_name in data[group_name]:  # type: ignore[operator]
                         continue
-                # Si data ya contenia flat key -> usarla, sino OS env
                 if key in data and data[key] not in (None, ""):
                     raw_value: object = data[key]
                 else:
@@ -551,7 +456,6 @@ class AppSettings(BaseSettings):
         return data
 
     def dump_safe(self) -> dict[str, object]:
-        """Dump config sin secrets (HF_TOKEN) / passwords. Usar para logging/diagnose."""
         d = self.model_dump(mode="python")
         if isinstance(d.get("hf"), dict) and "hf_token" in d["hf"]:
             tok: SecretStr | None = d["hf"].get("hf_token")
@@ -564,18 +468,7 @@ class AppSettings(BaseSettings):
         return d
 
 
-# ---------------------------------------------------------------------------
-# Publico: accessor singleton con caching (testeable via monkeypatch env)
-# ---------------------------------------------------------------------------
-
-
 def get_settings() -> AppSettings:
-    """Retorna settings singleton cargado desde .env / env vars.
-
-    Nota: No usamos @lru_cache() global para tests (monkeypatch.setenv no
-    refresca cache). En tests llamamos AppSettings() directamente o limpiamos
-    cache via `get_settings.cache_clear()`.
-    """
     return _get_settings_cached()
 
 
@@ -585,7 +478,6 @@ def _get_settings_cached() -> AppSettings:
 
 
 def clear_settings_cache() -> None:
-    """Helper para tests / reload manual de configuracion."""
     _get_settings_cached.cache_clear()
 
 

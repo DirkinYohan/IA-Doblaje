@@ -1,11 +1,3 @@
-"""Convierte el M2M100 418M local a CTranslate2 int8 (sin red).
-
-Uso:
-    .venv\\Scripts\\python.exe scripts\\convert_m2m100_ct2.py
-
-Genera ``models/m2m100_418M_ct2_int8`` (~470 MB). El modo en vivo lo usa si
-existe; si no, traduce con el modelo PyTorch, unas cuatro veces más lento.
-"""
 from __future__ import annotations
 
 import os

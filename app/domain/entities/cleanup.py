@@ -1,7 +1,3 @@
-"""Entidad TempCleanupResult Step 14 — Temp Cleanup. Capa DOMAIN.
-
-Frozen + extra=forbid. Sin Path/handles/objetos Infrastructure. Determinista.
-"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -10,8 +6,6 @@ from app.core.constants import PipelineStep
 
 
 class TempCleanupResult(BaseModel):
-    """Resultado Step 14 Temp Cleanup. Inmutable. Sin SHA artificial."""
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -44,11 +38,9 @@ class TempCleanupResult(BaseModel):
 
     @model_validator(mode="after")
     def _validate_all(self) -> "TempCleanupResult":
-        # step debe ser siempre TEMP_CLEANUP
         if self.step != PipelineStep.TEMP_CLEANUP:
             raise ValueError("step debe ser PipelineStep.TEMP_CLEANUP")
 
-        # success coherente con errors
         if self.success and self.errors:
             raise ValueError("success=True no puede tener errors no vacíos")
 

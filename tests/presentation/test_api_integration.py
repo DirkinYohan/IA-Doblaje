@@ -1,8 +1,3 @@
-"""Tests de integración de la API: subida por streaming, jobs, exportación.
-
-Ejercitan la app real (FastAPI + SQLite en tmp) contra ficheros de medios
-reales generados con FFmpeg. Sin mocks del pipeline.
-"""
 from __future__ import annotations
 
 import json
@@ -40,7 +35,6 @@ def _ffmpeg(args: list[str], target: Path) -> bool:
 
 @pytest.fixture(scope="module")
 def media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    """Vídeo de 3 s con pista de audio real + WAV de silencio."""
     folder = tmp_path_factory.mktemp("media")
     video = folder / "clip.mp4"
     if not _ffmpeg(
@@ -60,14 +54,12 @@ def media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
 
 @pytest.fixture(scope="module")
 def client(tmp_path_factory: pytest.TempPathFactory):
-    """App real con base de datos, correo y almacenamiento aislados."""
     from app.presentation.api import worker
 
     worker.reset()
     tmp = tmp_path_factory.mktemp("api")
     os.environ["IA_DB_PATH"] = str(tmp / "app.sqlite")
     os.environ["IA_MAIL_DIR"] = str(tmp / "mail")
-    # El worker se desactiva: los tests comprueban el contrato HTTP, no la IA.
     os.environ["IA_DISABLE_WORKER"] = "1"
     os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 
@@ -82,7 +74,6 @@ def client(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(autouse=True)
 def _unlimited_rate_limits(client: TestClient):
-    """Los límites por IP son 5-10/min y la suite hace muchos registros."""
     from app.presentation.api.security import RateLimiter
 
     app = client.app
@@ -108,7 +99,6 @@ def auth(client: TestClient) -> dict[str, str]:
 
 
 def _login(client: TestClient, email: str, password: str = "password123") -> None:
-    """Vuelve a autenticar la sesión del cliente de pruebas."""
     response = client.post("/api/auth/login", json={"email": email, "password": password})
     assert response.status_code == 200, response.text
 
@@ -173,14 +163,12 @@ class TestAuthRequirements:
             json={"token": token, "password": "nuevaclave123", "confirm": "nuevaclave123"},
         )
         assert reset.status_code == 200
-        # El token es de un solo uso.
         again = client.post(
             "/api/auth/reset-password",
             json={"token": token, "password": "otraclave123", "confirm": "otraclave123"},
         )
         assert again.status_code == 400
         assert client.get("/api/auth/me").status_code == 401, "el reset invalida sesiones"
-        # Se restaura la contraseña original para el resto de la suite.
         login = client.post("/api/auth/login", json={"email": auth["email"], "password": "nuevaclave123"})
         assert login.status_code == 200
         changed = client.post(
@@ -215,7 +203,6 @@ class TestUserProfile:
         )
         assert ok.status_code == 200
         assert ok.json()["pending_email"] == "nuevo@example.com"
-        # El cambio se aplica al confirmar la dirección nueva.
         assert client.get("/api/auth/me").json()["email"] == auth["email"]
         from tests.fixtures.mailbox import wait_for_mail
 
@@ -223,7 +210,6 @@ class TestUserProfile:
         token = wait_for_mail(mail_dir, "verify", "nuevo@example.com")["token"]
         assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
         assert client.get("/api/auth/me").json()["email"] == "nuevo@example.com"
-        # Se restaura para los demás tests.
         assert client.post(
             "/api/auth/change-email",
             json={"email": auth["email"], "password": "password123"},
@@ -261,9 +247,7 @@ class TestStreamingUpload:
 
         detail = client.get(f"/api/videos/{body['id']}").json()
         video = detail["video"]
-        # Duración medida con ffprobe en el servidor, no en el cliente.
         assert video["duration_ms"] > 2000, video
-        # Metadatos para la tarjeta, sin <video> oculto.
         assert "thumbnail_url" in video
         assert video["source_language"] in {"und", "es", "en"}
         assert video["target_languages"] == ["es", "en"]
@@ -329,11 +313,6 @@ class TestJobStates:
     def test_el_upload_no_arranca_el_procesamiento(
         self, client: TestClient, auth: dict[str, str], media: dict[str, Path]
     ) -> None:
-        """Sin worker no hay quién procese: el job queda preparado (PENDING).
-
-        Con worker, subir ARRANCA el procesamiento (ver
-        `test_con_worker_subir_arranca_el_procesamiento`).
-        """
         _login(client, auth["email"])
         with media["video"].open("rb") as handle:
             created = client.post(
@@ -352,7 +331,6 @@ class TestJobStates:
     def test_con_worker_subir_arranca_el_procesamiento(
         self, client: TestClient, auth: dict[str, str], media: dict[str, Path], monkeypatch
     ) -> None:
-        """El usuario no tiene que pulsar nada: al subir empieza a prepararse."""
         from app.presentation.api import live, worker
 
         started: list[tuple[str, str | None]] = []
@@ -376,7 +354,6 @@ class TestJobStates:
     def test_producir_arranca_y_con_worker_apagado_falla_explicito(
         self, client: TestClient, auth: dict[str, str], media: dict[str, Path]
     ) -> None:
-        """«Producir» encola de verdad; si el worker está apagado, lo dice."""
         _login(client, auth["email"])
         with media["video"].open("rb") as handle:
             created = client.post(
@@ -399,12 +376,6 @@ class TestJobStates:
     def test_producir_reutiliza_el_job_preparado_al_subir(
         self, client: TestClient, auth: dict[str, str], media: dict[str, Path]
     ) -> None:
-        """Sin trabajo en curso, Producir arranca el job ya preparado.
-
-        No debe crear uno nuevo: con el worker apagado el primer intento falla
-        al instante, así que se vuelve a dejar el trabajo en PENDING para
-        comprobar de forma determinista que se reutiliza (no se duplica).
-        """
         _login(client, auth["email"])
         with media["video"].open("rb") as handle:
             created = client.post(
@@ -421,7 +392,6 @@ class TestJobStates:
         assert first["started"] is True
 
         before = len(client.get(f"/api/videos/{project_id}").json()["jobs"])
-        # Se devuelve el trabajo a PENDING y se vuelve a producir.
         db.run(
             conn,
             "UPDATE jobs SET status='PENDING', progress=0, stage='PENDING', error='' WHERE id=?",
@@ -485,7 +455,6 @@ class TestJobStates:
         assert other.status_code == 200, other.text
         assert client.get(f"/api/jobs/{created['job_id']}").status_code == 404
         assert client.get(f"/api/videos/{created['id']}").status_code == 404
-        # Se recupera la sesión original.
         client.post("/api/auth/logout")
         _login(client, auth["email"])
 

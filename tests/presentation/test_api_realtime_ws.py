@@ -1,9 +1,3 @@
-"""Tests del WebSocket de tiempo real: PCM real -> transcripción -> cues.
-
-El WebSocket de `TestClient` es síncrono y no todos los envíos producen
-respuesta (una trama cuyo parcial sale vacío no emite nada), así que las
-lecturas se hacen desde un hilo con timeout en vez de bloquear el test.
-"""
 from __future__ import annotations
 
 import base64
@@ -20,7 +14,6 @@ from tests.fixtures.accounts import sign_up
 
 
 def _pcm_b64(samples: list[float]) -> str:
-    """Codifica floats [-1,1] como PCM s16le en base64, igual que el frontend."""
     raw = b"".join(struct.pack("<h", int(max(-1.0, min(1.0, s)) * 32767)) for s in samples)
     return base64.b64encode(raw).decode("ascii")
 
@@ -46,8 +39,6 @@ def _authenticate(client: TestClient) -> None:
 
 
 class _StubTranscriber:
-    """Transcribe de verdad el flujo: texto distinto para parcial y final."""
-
     def __init__(self) -> None:
         self.calls: list[tuple[int, bool]] = []
 
@@ -57,8 +48,6 @@ class _StubTranscriber:
 
 
 class _Reader:
-    """Lee mensajes del socket en un hilo y los encola, sin bloquear el test."""
-
     def __init__(self, socket: Any) -> None:
         self.queue: queue.Queue[dict[str, Any]] = queue.Queue()
         self._socket = socket
@@ -80,7 +69,6 @@ class _Reader:
             return None
 
     def collect(self, timeout: float = 0.4) -> list[dict[str, Any]]:
-        """Todo lo recibido hasta que pase `timeout` sin mensajes nuevos."""
         out: list[dict[str, Any]] = []
         while True:
             item = self.next(timeout)
@@ -112,11 +100,6 @@ def test_websocket_rechaza_mensaje_desconocido(tmp_path, monkeypatch) -> None:
 
 @pytest.fixture
 def stub_transcriber(monkeypatch):
-    """Sustituye ASR y traducción reales por dobles deterministas.
-
-    Se dobla también el traductor para que la prueba no cargue M2M100 (17 s) y
-    pueda comprobar el contrato de traducción en vivo.
-    """
     import app.presentation.api.main as main_module
 
     stub = _StubTranscriber()
@@ -132,18 +115,11 @@ def stub_transcriber(monkeypatch):
 
 
 def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) -> None:
-    """Camino completo: config -> audio PCM -> parcial -> final -> seek.
-
-    El WebSocket de `TestClient` procesa una trama por iteración del bucle de
-    eventos, así que se envían tramas hasta reunir las evidencias esperadas,
-    con un límite duro para que el test no pueda quedarse colgado.
-    """
     with _make_client(tmp_path, monkeypatch) as client:
         _authenticate(client)
         with client.websocket_connect("/api/realtime") as socket:
             reader = _Reader(socket)
             try:
-                # Viendo el idioma ORIGINAL: sin destinos, hay parciales.
                 socket.send_json({"type": "config", "source_language": "es", "targets": []})
                 configured = reader.next()
                 assert configured is not None and configured["type"] == "configured"
@@ -160,7 +136,6 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
                         elif event["type"] == "final":
                             finals.append(event)
 
-                # 1. 20 tramas de 100 ms de "voz" a 16 kHz (como el AudioWorklet).
                 voice = _pcm_b64([0.25] * 1_600)
                 for index in range(20):
                     if partials:
@@ -172,11 +147,8 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
                 assert partials[0]["state"] == "provisional"
                 assert partials[0]["text"] == "Hola"
                 assert partials[0]["language"] == "es"
-                # El contrato siempre incluye el mapa de traducciones; los
-                # parciales no se traducen (coste en CPU), sólo los finales.
                 assert partials[0]["translations"] == {}
 
-                # El usuario cambia a inglés SIN reconectar: nuevo `config`.
                 socket.send_json({"type": "config", "source_language": "es", "targets": ["en"]})
                 for _ in range(10):
                     candidate = reader.next(timeout=1.0)
@@ -185,7 +157,6 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
                         assert candidate["targets"] == ["en"]
                         break
 
-                # 2. Silencio: cierra el segmento y emite el subtítulo DEFINITIVO.
                 silence = _pcm_b64([0.0] * 1_600)
                 for _ in range(12):
                     if finals:
@@ -199,7 +170,6 @@ def test_websocket_config_y_pcm_real(tmp_path, monkeypatch, stub_transcriber) ->
                 assert finals[0]["translations"] == {"en": "[en] Hola, ¿cómo estás?"}
                 assert finals[0]["end_ms"] >= finals[0]["start_ms"]
 
-                # 3. Seek: limpia el estado y reanuda el reloj.
                 socket.send_json({"type": "seek", "time_ms": 5_000})
                 cleared = None
                 for _ in range(10):
@@ -253,11 +223,9 @@ def test_websocket_pcm_invalido_no_rompe_la_sesion(tmp_path, monkeypatch, stub_t
             try:
                 socket.send_json({"type": "config", "source_language": "en", "targets": []})
                 assert (reader.next() or {}).get("type") == "configured"
-                # Tramas degeneradas: vacía, base64 inválido y sin campo de audio.
                 socket.send_json({"type": "audio", "pcm_b64": ""})
                 socket.send_json({"type": "audio", "pcm_b64": "!!!no-base64!!!"})
                 socket.send_json({"type": "audio"})
-                # La sesión sigue viva: un mensaje válido vuelve a responder.
                 socket.send_json({"type": "seek", "time_ms": 10})
                 cleared = reader.next()
                 assert cleared is not None and cleared["type"] == "cleared"

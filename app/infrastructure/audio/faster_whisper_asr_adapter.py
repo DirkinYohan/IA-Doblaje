@@ -10,9 +10,6 @@ from app.core.exceptions import (
     ModelLoadError,
 )
 
-# =============================================================================
-# IMPORT FASTER-WHISPER — NO en tiempo de import. Lazy.
-# =============================================================================
 _faster_whisper_imported_ok = False
 _WhisperModel_cls: Any = None
 _ctranslate2_import_err: str | None = None
@@ -30,9 +27,6 @@ except Exception as exc:  # noqa: BLE001 - import guard runtime
     )
 
 
-# =============================================================================
-# CONSTANTES FINALES (NO acepta configuración usuario) — D#2 + D#3
-# =============================================================================
 MODEL_FOLDERNAME = "whisper_small_ct2_int8_fp16_local_v1"
 
 MODEL_LABEL = "faster-whisper:small:int8-fp16:ct2-local-v1"
@@ -43,13 +37,12 @@ REQUIRED_FILES_INSIDE_FOLDER = (
 )
 
 REQUIRED_FILES_INSIDE_FOLDER_OR = (
-    # CTranslate2 folder con tokenizer.json (modern) o vocabulary.txt (legacy)
     "tokenizer.json",
     "vocabulary.txt",
 )
 
-FOLDER_MIN_SIZE_BYTES = 50_000_000  # 50 MB approx min
-FOLDER_MAX_SIZE_BYTES = 5_000_000_000  # 5 GB max safety
+FOLDER_MIN_SIZE_BYTES = 50_000_000
+FOLDER_MAX_SIZE_BYTES = 5_000_000_000
 
 
 def _as_mono_f32(np_mod: Any, audio: Any, sr_read: int) -> Any:
@@ -82,7 +75,6 @@ def _read_wav_window(
     end_ms: int,
     pad_ms: int = 120,
 ) -> tuple[Any, int]:
-    """Lee solo la ventana de voz. Devuelve (float32, offset_ms de la ventana)."""
     try:
         with sf_mod.SoundFile(str(wav_path)) as handle:
             sr = int(handle.samplerate)
@@ -159,12 +151,7 @@ def _segment_from_raw(raw_seg: Any, index: int, offset_ms: int) -> Any:
     )
 
 
-# =============================================================================
-# LOADER — Port ASRModelLoaderPort
-# =============================================================================
 class FasterWhisperLocalModelLoader:
-    """Loader 100% local. Valida carpeta y contenido. SIN descargas."""
-
     __slots__ = ("_settings_getter", "_device_getter", "_folder_name")
 
     def __init__(
@@ -177,9 +164,6 @@ class FasterWhisperLocalModelLoader:
         self._device_getter = device_getter
         self._folder_name = folder_name or MODEL_FOLDERNAME
 
-    # ---------------------------------------------------------------------
-    # Helpers
-    # ---------------------------------------------------------------------
     def _get_models_dir(self) -> Path:
         if self._settings_getter is not None:
             settings = self._settings_getter()
@@ -207,11 +191,7 @@ class FasterWhisperLocalModelLoader:
             )
         return resolved
 
-    # ---------------------------------------------------------------------
-    # Validaciones estructura carpeta
-    # ---------------------------------------------------------------------
     def validate_folder_structure(self, folder_path: Path) -> None:
-        # 0) Seguridad Path Traversal: ruta resuelta debe estar DENTRO de models_cache_dir
         models_dir = self._get_models_dir()
         resolved_folder = Path(folder_path).expanduser().resolve()
         models_norm = models_dir.as_posix()
@@ -266,9 +246,6 @@ class FasterWhisperLocalModelLoader:
                 f"{total_bytes} bytes > {FOLDER_MAX_SIZE_BYTES}."
             )
 
-    # ---------------------------------------------------------------------
-    # Load API (implementa ASRModelLoaderPort.load)
-    # ---------------------------------------------------------------------
     def load(
         self,
         model_folder: Path,
@@ -277,18 +254,13 @@ class FasterWhisperLocalModelLoader:
         compute_type: str | None = None,
     ) -> Any:
         global _WhisperModel_cls, _faster_whisper_imported_ok, _ctranslate2_import_err
-        # 1) Validar carpeta ANTES de cualquier cosa (pure Path checks, no dependencia)
         self.validate_folder_structure(Path(model_folder))
-        # 2) Chequear dependencia sólo cuando realmente se va a instanciar WhisperModel
         if not _faster_whisper_imported_ok:
             raise ConfigurationError(_ctranslate2_import_err or "")
         if compute_type is None:
             compute_type = "int8_float16"
         local_abs_path_str = str(Path(model_folder).expanduser().resolve())
         try:
-            # WhisperModel de Faster-Whisper recibe ruta local absoluta del folder.
-            # No pasar string identificador HuggingFace. local_files_only implícito
-            # porque la ruta SÍ es un path absoluto existente = carpeta local.
             model = _WhisperModel_cls(
                 local_abs_path_str,
                 device=device,
@@ -304,12 +276,7 @@ class FasterWhisperLocalModelLoader:
         return model
 
 
-# =============================================================================
-# ADAPTER PRINCIPAL PERF = Faster-Whisper Small int8_float16 + CT2 local
-# =============================================================================
 class FasterWhisperSmallASRAdapter:
-    """Adapter ASR Step 06 PERF. Implementa ASRPort Protocol."""
-
     __slots__ = (
         "_loader",
         "_cached_model",
@@ -333,9 +300,6 @@ class FasterWhisperSmallASRAdapter:
         self._device_resolver = device_resolver
         self._compute_type = compute_type
 
-    # ---------------------------------------------------------------------
-    # Lazy model cache
-    # ---------------------------------------------------------------------
     @property
     def model_is_loaded(self) -> bool:
         return self._model_loaded_flag
@@ -364,9 +328,6 @@ class FasterWhisperSmallASRAdapter:
     def was_model_loaded_in_this_adapter(self) -> bool:
         return self._model_loaded_flag
 
-    # ---------------------------------------------------------------------
-    # ASRPort.transcribe
-    # ---------------------------------------------------------------------
     def transcribe_array(
         self,
         audio_f32: Any,
@@ -376,12 +337,6 @@ class FasterWhisperSmallASRAdapter:
         thresholds: Any | None = None,
         start_index: int = 0,
     ) -> list[Any]:
-        """Transcribe un array float32 [-1,1] ya en memoria.
-
-        Primitiva del procesamiento progresivo: el llamante trocea el audio y
-        sólo se paga la carga del modelo una vez (cacheada en la instancia).
-        Devuelve segmentos de dominio con timestamps ABSOLUTOS.
-        """
         from app.domain.value_objects.asr import AsrThresholds
 
         if audio_f32 is None or getattr(audio_f32, "size", 0) == 0:
@@ -424,13 +379,11 @@ class FasterWhisperSmallASRAdapter:
         thresholds: Any | None = None,
         job_id: Any | None = None,
     ) -> Any:
-        # Late imports para no romper imports de archivos Domain
         from app.domain.entities.asr import ASRResult, ASRSegment
         from app.domain.value_objects.asr import AsrThresholds
         import numpy as _np
         import soundfile as _sf
 
-        # 1) None checks (redundante con UseCase pero defensive)
         if preprocessed_audio is None:
             raise ASRProcessingError("preprocessed_audio None en adapter ASR")
         if lid_result is None:
@@ -439,7 +392,6 @@ class FasterWhisperSmallASRAdapter:
             raise ASRProcessingError("vad_result None en adapter ASR")
         eff_thr: AsrThresholds = thresholds if isinstance(thresholds, AsrThresholds) else AsrThresholds()
 
-        # 2) D#9 Silent fallback ya se gestionó en UseCase. Pero doble check:
         if (
             int(getattr(vad_result, "num_intervals", -1)) == 0
             and getattr(eff_thr, "allow_empty_transcript_when_no_voice", True)
@@ -453,11 +405,9 @@ class FasterWhisperSmallASRAdapter:
         if wav_path is None:
             raise ASRProcessingError("PreprocessedAudio no tiene wav_path")
 
-        # 4) Idioma: T05 language_code (si != "und") → explicit. "und" → None (auto-detect decoder)
         t05_lang_code: str = str(getattr(lid_result, "language_code", "und"))
         decoder_language: str | None = None if t05_lang_code == "und" else t05_lang_code
 
-        # 5) Cargar modelo LAZY
         model = self._get_or_load_model()
 
         beam_size = int(getattr(eff_thr, "beam_size", 1) or 1)
@@ -523,13 +473,8 @@ class FasterWhisperSmallASRAdapter:
                     cnt_with_logprob += 1
         num_segments = len(domain_segments)
 
-        # 8) Transcript completo: concatenar texto de segmentos
         transcript_text = "".join(seg.text for seg in domain_segments).strip()
 
-        # 9) Confianza promedio normalizada [0,1]
-        #    Mapeo monotónico determinista:
-        #      avg_logprob habitual (-6 .. 0) → 0 .. 1
-        #      confidence = clip( (avg + 6) / 6 , 0, 1)
         if num_segments > 0 and cnt_with_logprob > 0:
             mean_avg_lp = running_avg_logprob / cnt_with_logprob
             confidence_raw = (mean_avg_lp + 6.0) / 6.0
@@ -537,7 +482,6 @@ class FasterWhisperSmallASRAdapter:
         else:
             confidence = 0.0
 
-        # 10) Language usado realmente por decoder: viene en info.language
         transcript_language_code: str
         inferred_lang = getattr(info, "language", None) if info is not None else None
         if isinstance(inferred_lang, str) and len(inferred_lang) in (2, 3):

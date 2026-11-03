@@ -1,8 +1,3 @@
-"""Entidades de multimedia y audio — Capa DOMAIN.
-
-Son ValueObjects grandes y estructurados: validados, frozen=True.
-Sin dependencias de Application ni Infrastructure.
-"""
 from __future__ import annotations
 
 from typing import Any
@@ -27,31 +22,11 @@ from app.domain.value_objects.audio import (
 from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# Helpers — tipos validados sin depender de BaseModel custom ints ya validados
-# ---------------------------------------------------------------------------
-
-
 def _as_abs_path(p: Path | str) -> Path:
     return Path(p).resolve()
 
 
-# ---------------------------------------------------------------------------
-# Step 01 — ValidatedMedia
-# ---------------------------------------------------------------------------
-
-
 class ValidatedMedia(BaseModel):
-    """Resultado de Media Validation (Pipeline Step 01).
-
-    Garantiza:
-        - path absoluto y sanitizado (via PathManager antes de llamar al Port)
-        - extension permitida (whitelist SafetyConfig)
-        - size > 0, size <= MAX_MEDIA_SIZE_GB
-        - SHA-256 file hash
-        - ffprobe devuelve al menos 1 stream de audio
-    """
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -104,19 +79,7 @@ class ValidatedMedia(BaseModel):
         return s
 
 
-# ---------------------------------------------------------------------------
-# Step 02 — ExtractedAudio
-# ---------------------------------------------------------------------------
-
-
 class ExtractedAudio(BaseModel):
-    """Resultado de Audio Extraction (Pipeline Step 02).
-
-    Salida WAV PCM 16-bit, sample_rate arbitrario (lo que detecta ffprobe antes del
-    preprocessing), canales arbitrarios. El Preprocessing (Step03) posterior normaliza a
-    16 kHz / 16-bit / mono target.
-    """
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -154,17 +117,7 @@ class ExtractedAudio(BaseModel):
         return _as_abs_path(v)
 
 
-# ---------------------------------------------------------------------------
-# Step 03 — PreprocessedAudio
-# ---------------------------------------------------------------------------
-
-
 class PreprocessedAudio(BaseModel):
-    """Resultado de Audio Preprocessing (Pipeline Step 03).
-
-    Garantizado: WAV PCM 16-bit, 16 kHz, mono, con filtros deterministas aplicados.
-    """
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -196,7 +149,6 @@ class PreprocessedAudio(BaseModel):
     @field_validator("sample_rate")
     @classmethod
     def _enforce_target_sr(cls, v: Any) -> SampleRate:
-        # Normalizamos a SampleRate, pero Step03 siempre debe ser 16kHz target.
         i = int(v)
         if i != 16000:
             raise ValueError(f"PreprocessedAudio sample_rate debe ser 16000, got {i}")
@@ -219,17 +171,7 @@ class PreprocessedAudio(BaseModel):
         return BitDepth(i)
 
 
-# ---------------------------------------------------------------------------
-# UseCase — MediaPrepResult agregado Steps 01-03
-# ---------------------------------------------------------------------------
-
-
 class MediaPrepResult(BaseModel):
-    """Resultado final de AnalyzeMediaPrepUseCase.execute().
-
-    Representa Steps 01-03 del pipeline listos para pasar a Step 04 (VAD).
-    """
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,

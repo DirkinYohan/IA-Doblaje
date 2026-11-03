@@ -5,9 +5,6 @@ from typing import Annotated, Any, Literal
 from pydantic import BeforeValidator, ConfigDict, model_validator
 from pydantic import BaseModel as _PydanticBase
 
-# ---------------------------------------------------------------------------
-# Helpers reutilizables
-# ---------------------------------------------------------------------------
 def _reject_bool(v: Any) -> Any:
     if isinstance(v, bool):
         raise TypeError("No se permite coerción bool → int/float en VO T07.")
@@ -42,9 +39,6 @@ def _validate_non_negative_float01(v: Any) -> float:
     return value
 
 
-# ---------------------------------------------------------------------------
-# Timestamp Value Objects frozen forbid defaults
-# ---------------------------------------------------------------------------
 TimedStartMs = Annotated[int, BeforeValidator(_validate_non_negative_int)]
 TimedEndMs = Annotated[int, BeforeValidator(_validate_non_negative_int)]
 DurationMs = Annotated[int, BeforeValidator(_validate_non_negative_int)]
@@ -69,13 +63,7 @@ TimestampedWordIndex = Annotated[int, BeforeValidator(_validate_non_negative_int
 TimestampedSegmentIndex = Annotated[int, BeforeValidator(_validate_non_negative_int)]
 
 
-# ---------------------------------------------------------------------------
-# AsrTimestampThresholds: VO frozen defaults configurables T07
-# ---------------------------------------------------------------------------
 class AsrTimestampThresholds(_PydanticBase):
-    """Umbrales configurables para Step 07 Timestamp Generation.
-    frozen + forbid. Sin coerción bool."""
-
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_segments_safety: int = 1_000_000

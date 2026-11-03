@@ -1,20 +1,3 @@
-"""Verificacion standalone de entorno de terceros (T02.6 implementacion).
-
-Uso: python scripts/verify_third_party.py
-
-Salida: Rich table CHECK | STATUS | VALUE | MESSAGE
-Estados: PASS | WARNING | ERROR
-Exit codes:
-  0 = todo correcto
-  1 = warnings (no critico, continuar con cuidado)
-  2 = errores criticos (no se puede operar el motor)
-
-REGLAS T02:
-  - Ausencia de PyTorch / CUDA en Fase 1 NO es ERROR critico (WARNING).
-  - No importar modelos IA, no descargar pesos, no aceptar HF gates.
-  - No leakear tokens. HF_TOKEN: si existe -> PASS (sin imprimir valor).
-"""
-
 from __future__ import annotations
 
 import json
@@ -26,8 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Hacemos ejecutable standalone (no necesita el paquete instalado via pip install -e)
-# pero si esta disponible, mejor. Si no, aun asi corre.
 try:  # pragma: no cover - import standalone
     from rich.console import Console
     from rich.table import Table
@@ -37,10 +18,6 @@ except Exception:  # pragma: no cover - rich en el proyecto
     print("    pip install -e \".[dev]\"")
     sys.exit(2)
 
-
-# =============================================================================
-# Estructuras internas
-# =============================================================================
 
 STATUS_PASS = "PASS"
 STATUS_WARNING = "WARNING"
@@ -69,14 +46,9 @@ class CheckResult:
         return 0
 
 
-# =============================================================================
-# Checkers individuales
-# =============================================================================
-
-
 def _check_python() -> CheckResult:
     py_min = (3, 11)
-    py_max = (3, 13)  # <3.13
+    py_max = (3, 13)
     ver = sys.version_info[:3]
     ver_str = f"{ver[0]}.{ver[1]}.{ver[2]}"
     if py_min <= ver[:2] < py_max:
@@ -88,7 +60,6 @@ def _check_python() -> CheckResult:
 
 
 def _find_pyproject_root() -> Path:
-    """Encuentra el proyecto root (donde esta pyproject.toml)."""
     here = Path(__file__).resolve().parent
     for candidate in (here, here.parent):
         if (candidate / "pyproject.toml").exists():
@@ -220,7 +191,6 @@ def _check_hf_token() -> CheckResult:
     )
     token = str(token).strip()
     if not token:
-        # Buscar en ~/.cache/huggingface/token
         home = Path.home()
         candidate = home / ".cache" / "huggingface" / "token"
         try:
@@ -235,7 +205,6 @@ def _check_hf_token() -> CheckResult:
             "HF_TOKEN", STATUS_WARNING, "not set",
             "Token HF no encontrado. Modelos gated (pyannote) no accesibles sin token.",
         )
-    # Presente: NO imprimir valor. Longitud se puede mostrar.
     val = f"set (len={len(token)})"
     return CheckResult("HF_TOKEN", STATUS_PASS, val, "Token detectado (no se imprime por seguridad).")
 
@@ -355,10 +324,6 @@ def _check_ram() -> CheckResult:
             "psutil no disponible, no se puede medir RAM exacta (no critico).",
         )
 
-
-# =============================================================================
-# Ejecucion principal
-# =============================================================================
 
 ALL_CHECKS_ORDERED = [
     _check_python,

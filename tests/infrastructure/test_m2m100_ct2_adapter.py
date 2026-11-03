@@ -1,4 +1,3 @@
-"""Traductor M2M100 sobre CTranslate2 (modelo real, si está convertido)."""
 from __future__ import annotations
 
 import pytest

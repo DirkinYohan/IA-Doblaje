@@ -1,8 +1,3 @@
-"""Entidad TranslationResult Step 15 — Capa DOMAIN.
-
-Frozen + extra=forbid. Sin filesystem (rutas como strings). Sin IA.
-Chain of custody vía source_reference (job_id + source_language).
-"""
 from __future__ import annotations
 
 from typing import Literal
@@ -19,8 +14,6 @@ MODEL_LABEL_TRANSLATION_V1_LITERAL: Literal["t15:translation:v1"] = "t15:transla
 
 
 class TranslationResult(BaseModel):
-    """Resultado Step 15. Inmutable. Correspondencia 1:1 garantizada."""
-
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
@@ -37,13 +30,9 @@ class TranslationResult(BaseModel):
     )
     validation: TranslationValidation = Field(default_factory=TranslationValidation)
 
-    # =====================================================================
-    # VALIDADORES
-    # =====================================================================
 
     @model_validator(mode="after")
     def _validate_all(self) -> "TranslationResult":
-        # (A) 1:1 — segment_index contiguo desde 0, sin duplicados ni huecos
         expected = 0
         seen: set[int] = set()
         for seg in self.segments:
@@ -58,7 +47,6 @@ class TranslationResult(BaseModel):
                 )
             expected += 1
 
-        # (B) Coherencia con validation global
         if self.validation.num_segments_input != len(self.segments):
             raise ValueError(
                 "TranslationResult validation.num_segments_input != len(segments)."
@@ -67,7 +55,6 @@ class TranslationResult(BaseModel):
             raise ValueError(
                 "TranslationResult validation.num_segments_output != len(segments)."
             )
-        # (C) validation.ok coherente con errores
         if self.validation.ok and self.validation.errors:
             raise ValueError("TranslationResult validation.ok=True con errors no vacío.")
         return self

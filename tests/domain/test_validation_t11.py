@@ -1,7 +1,3 @@
-"""Tests unitarios T11 — Domain Value Objects y Entity Validation.
-
-Solo DOMAIN, sin IA/infraestructura. Pydantic + patrón DUT.
-"""
 from __future__ import annotations
 
 import copy
@@ -58,11 +54,6 @@ def _result(**kw):
     return ValidationResult(**base)
 
 
-# =============================================================================
-# ValidationCheckResult
-# =============================================================================
-
-
 class TestValidationCheckResult:
     def test_valid(self):
         r = _check("VC01", "passed")
@@ -85,11 +76,6 @@ class TestValidationCheckResult:
     def test_extra_forbid(self):
         with pytest.raises(ValidationError):
             ValidationCheckResult(check_code="VC01", outcome="passed", x=1)  # type: ignore[call-arg]
-
-
-# =============================================================================
-# ValidationThresholds
-# =============================================================================
 
 
 class TestValidationThresholds:
@@ -115,11 +101,6 @@ class TestValidationThresholds:
     def test_bool_rejected(self):
         with pytest.raises(ValidationError):
             ValidationThresholds(pass_threshold=True)  # type: ignore[arg-type]
-
-
-# =============================================================================
-# ValidationResult
-# =============================================================================
 
 
 class TestValidationResult:
@@ -157,7 +138,7 @@ class TestValidationResult:
         with pytest.raises(ValidationError):
             _result(
                 check_results=tuple(checks),
-                validation_passed=True,  # inconsistente: hay error
+                validation_passed=True,
                 validation_status="passed",
                 num_errors=0,
                 num_passed=11,
@@ -216,7 +197,6 @@ class TestValidationResultAdditional:
         assert r.num_warnings == 1
 
     def test_status_passed_rejects_warnings_inconsistent(self):
-        # passed pero con warning contado → inconsistente
         checks = list(_all_checks())
         checks[10] = _check("VC11", "warning")
         with pytest.raises(ValidationError):

@@ -1,7 +1,3 @@
-"""Tests unitarios T12 — Domain Value Objects y Entity Metrics.
-
-Solo DOMAIN, sin IA/infraestructura. Pydantic + patrón DUT.
-"""
 from __future__ import annotations
 
 import copy
@@ -38,11 +34,6 @@ def _result(**kw):
     )
     base.update(kw)
     return MetricsResult(**base)
-
-
-# =============================================================================
-# RuntimeMetricsSnapshot
-# =============================================================================
 
 
 class TestRuntimeMetricsSnapshot:
@@ -92,11 +83,6 @@ class TestRuntimeMetricsSnapshot:
         assert set(PIPELINE_STEP_NAMES) == {s.name for s in PipelineStep}
 
 
-# =============================================================================
-# MetricsResult
-# =============================================================================
-
-
 class TestMetricsResult:
     def test_valid(self):
         r = _result()
@@ -116,7 +102,7 @@ class TestMetricsResult:
             _result(
                 processing_wall_time_sec=10.0,
                 audio_duration_sec=5.0,
-                real_time_factor_RTF=999.0,  # incorrecto
+                real_time_factor_RTF=999.0,
             )
 
     def test_rtf_none_allowed(self):

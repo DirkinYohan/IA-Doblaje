@@ -1,7 +1,3 @@
-"""Tests unitarios T09 — Domain Value Objects y Entity Alignment.
-
-Solo DOMAIN, sin IA/infraestructura. Pydantic + patrón DUT T04/T05/T08.
-"""
 from __future__ import annotations
 
 import copy
@@ -42,11 +38,6 @@ def _seg(**kw):
     )
     base.update(kw)
     return DialogueSegment(**base)
-
-
-# =============================================================================
-# DialogueSegment
-# =============================================================================
 
 
 class TestDialogueSegment:
@@ -108,11 +99,6 @@ class TestDialogueSegment:
             _seg(x=1)  # type: ignore[call-arg]
 
 
-# =============================================================================
-# AlignmentThresholds
-# =============================================================================
-
-
 class TestAlignmentThresholds:
     def test_defaults(self):
         th = AlignmentThresholds()
@@ -134,11 +120,6 @@ class TestAlignmentThresholds:
     def test_bool_rejected(self):
         with pytest.raises(ValidationError):
             AlignmentThresholds(min_overlap_ms=True)  # type: ignore[arg-type]
-
-
-# =============================================================================
-# AlignmentResult
-# =============================================================================
 
 
 def _result(**kw):
@@ -189,7 +170,7 @@ class TestAlignmentResult:
             _result(
                 dialogue_segments=(_seg(),),
                 num_segments=1,
-                num_segments_aligned=0,  # incorrecto
+                num_segments_aligned=0,
                 num_unassigned=0,
             )
 
@@ -199,7 +180,7 @@ class TestAlignmentResult:
                 dialogue_segments=(),
                 num_segments=5,
                 num_segments_aligned=0,
-                num_unassigned=0,  # 0 + 0 != 5
+                num_unassigned=0,
             )
 
     def test_segment_index_contiguous(self):

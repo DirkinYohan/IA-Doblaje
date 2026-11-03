@@ -1,11 +1,3 @@
-"""Cola en proceso. El HTTP no ejecuta el pipeline.
-
-Garantías:
-* El progreso es monótono y cada etapa tiene nombre real (`progress.PIPELINE_STAGES`).
-* El idioma detectado por T05 se persiste en `projects.source_language`.
-* Un reinicio de la API no deja jobs abandonados: `reconcile_orphans()` los
-  reencola o los marca como fallidos con causa explícita.
-"""
 from __future__ import annotations
 
 import datetime as _dt
@@ -26,25 +18,16 @@ _CONN: Any = None
 _CANCEL: dict[str, threading.Event] = {}
 _STARTED = False
 _LOCK = threading.Lock()
-# Generación del worker vigente: un hilo sólo atiende la cola de su generación.
 _GENERATION = 0
 
-# --- Bus de eventos por job (WebSocket) -----------------------------------
-# Cada suscriptor recibe los eventos a medida que se producen. Es en memoria
-# a propósito: el estado real está en SQLite, esto sólo evita el sondeo.
 _SUBSCRIBERS: dict[str, list[Any]] = {}
 _SUBSCRIBERS_LOCK = threading.Lock()
 
-# Tamaño máximo de la cola de un suscriptor lento: se descartan eventos viejos
-# antes que bloquear al worker o crecer sin límite.
 _SUBSCRIBER_QUEUE_MAX = 500
 
-# Traduce el audio en bloques de esta duración dentro de una ventana.
 TRANSLATION_BATCH_CHARS = 4000
 
-# Estados terminales: nunca se reencolan.
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
-# Estados que implican que la cola en memoria los perdió al reiniciar.
 ORPHAN_STATES = {"PENDING", "QUEUED", "PROCESSING", "TRANSCRIBING", "TRANSLATING", "GENERATING_SUBTITLES"}
 
 
@@ -52,13 +35,7 @@ def _utcnow() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
 
-# ---------------------------------------------------------------------------
-# Bus de eventos
-# ---------------------------------------------------------------------------
-
-
 def subscribe(job_id: str) -> _queue_module.Queue:
-    """Alta de un suscriptor. Devuelve la cola donde recibirá los eventos."""
     channel: _queue_module.Queue = _queue_module.Queue(maxsize=_SUBSCRIBER_QUEUE_MAX)
     with _SUBSCRIBERS_LOCK:
         _SUBSCRIBERS.setdefault(job_id, []).append(channel)
@@ -77,14 +54,12 @@ def unsubscribe(job_id: str, channel: _queue_module.Queue) -> None:
 
 
 def publish(job_id: str, event: dict[str, Any]) -> None:
-    """Emite un evento a todos los suscriptores del job. Nunca bloquea."""
     with _SUBSCRIBERS_LOCK:
         listeners = list(_SUBSCRIBERS.get(job_id, ()))
     for channel in listeners:
         try:
             channel.put_nowait(event)
         except _queue_module.Full:
-            # Suscriptor lento: se descarta el evento más antiguo y se sigue.
             try:
                 channel.get_nowait()
                 channel.put_nowait(event)
@@ -93,12 +68,6 @@ def publish(job_id: str, event: dict[str, Any]) -> None:
 
 
 def start(conn: Any) -> None:
-    """Arranca el hilo de trabajos para esta conexión.
-
-    Se usa un número de generación en lugar de un flag de parada compartido: un
-    worker nuevo no puede heredar la orden de parada de uno anterior (esa
-    carrera dejaba el trabajo sin procesar).
-    """
     global _QUEUE, _STARTED, _CONN, _GENERATION
     import os
 
@@ -107,8 +76,6 @@ def start(conn: Any) -> None:
     with _LOCK:
         if _STARTED and _CONN is conn:
             return
-        # Un worker de otra conexión quedaría escribiendo en una base de datos
-        # ajena: se le invalida subiendo la generación.
         _GENERATION += 1
         generation = _GENERATION
         import queue
@@ -125,10 +92,9 @@ def start(conn: Any) -> None:
 
 
 def reset() -> None:
-    """Detiene el worker y limpia el estado global (pruebas, cambios de BD)."""
     global _QUEUE, _STARTED, _CONN, _GENERATION
     with _LOCK:
-        _GENERATION += 1  # invalida cualquier hilo en vuelo
+        _GENERATION += 1
         _QUEUE = None
         _STARTED = False
         _CONN = None
@@ -148,7 +114,6 @@ def enqueue(conn: Any, job_id: str) -> None:
         (json.dumps(queued_entry, ensure_ascii=False), _utcnow(), job_id),
     )
     if _QUEUE is None:
-        # Worker desactivado explícitamente: no dejar el job mintiendo.
         db.run(
             conn,
             "UPDATE jobs SET status='FAILED', error='worker desactivado (IA_DISABLE_WORKER=1)', updated_at=? WHERE id=?",
@@ -170,12 +135,6 @@ def cancel(conn: Any, job_id: str) -> None:
 
 
 def reconcile_orphans(conn: Any) -> dict[str, int]:
-    """Reencola jobs que quedaron colgados por un reinicio del proceso.
-
-    Debe llamarse una vez al arrancar la API, antes de aceptar peticiones.
-    Un job en estado no terminal no tiene hilo que lo ejecute, así que se
-    reencola con progreso 0 en lugar de quedar eternamente en PROCESSING.
-    """
     rows = db.many(
         conn,
         "SELECT id, status FROM jobs WHERE status IN ({})".format(
@@ -200,11 +159,6 @@ def reconcile_orphans(conn: Any) -> dict[str, int]:
 
 
 def _loop(conn: Any, generation: int) -> None:
-    """Bucle del worker. Termina cuando su generación deja de ser la vigente.
-
-    Comprobar la generación (en lugar de un flag compartido) evita que un
-    worker recién arrancado herede una orden de parada anterior.
-    """
     while True:
         current = _QUEUE
         if generation != _GENERATION or current is None:
@@ -220,13 +174,9 @@ def _loop(conn: Any, generation: int) -> None:
                 pass
             return
         try:
-            # Antes de empezar, limpia los medios que dejó el trabajo anterior:
-            # así un fallo de cierre no acumula archivos entre trabajos.
             _purge_media_temp()
             _run_job(conn, job_id)
         except Exception as exc:  # noqa: BLE001
-            # Marcar el fallo nunca debe matar el hilo: si la conexión ya no
-            # sirve, se ignora y se sigue atendiendo la cola.
             try:
                 db.run(
                     conn,
@@ -236,8 +186,6 @@ def _loop(conn: Any, generation: int) -> None:
             except Exception:  # noqa: BLE001
                 pass
         finally:
-            # Red de seguridad: aunque `_run_job` no llegue a su propio cierre,
-            # los medios descargados no se quedan en disco.
             _purge_media_temp()
             try:
                 current.task_done()
@@ -265,7 +213,6 @@ def _run_job(conn: Any, job_id: str) -> None:
     except (KeyError, TypeError):
         mode = "full"
 
-    # El bus es en memoria: se avisa de que se empieza.
     publish(job_id, {"type": "processing_started", "job_id": job_id, "mode": mode})
 
     try:
@@ -275,10 +222,7 @@ def _run_job(conn: Any, job_id: str) -> None:
 
         _run_job_full(conn, job_id, job, project)
     finally:
-        # Los medios descargados de Storage son temporales: se borran siempre,
-        # haya terminado bien, mal o cancelado. Nada permanente en disco.
         _purge_media_temp()
-        # La copia local que dejó la subida ya no hace falta una vez procesada.
         try:
             media_store.drop_pending(
                 Path(str(get_settings().paths.data_temp_dir)), str(project["id"])
@@ -288,12 +232,6 @@ def _run_job(conn: Any, job_id: str) -> None:
 
 
 def preload_models() -> None:
-    """Carga Whisper y M2M100 en segundo plano al arrancar la API.
-
-    Sin esto, el primer trabajo pagaba ~20 s de carga del ASR y ~15 s del
-    traductor dentro del camino crítico, justo antes del primer subtítulo. La
-    carga se hace una vez, al levantar el servidor, y el usuario no la espera.
-    """
     try:
         threading.Thread(target=_preload_models_sync, name="preload-models", daemon=True).start()
     except Exception:  # noqa: BLE001
@@ -301,16 +239,6 @@ def preload_models() -> None:
 
 
 def _preload_models_sync() -> None:
-    """Deja M2M100 cargado antes del primer trabajo.
-
-    El traductor guarda su modelo en una caché de módulo (`_load_once`), así que
-    precargarlo aquí sí lo reutiliza el primer trabajo: sin esto, la primera
-    traducción pagaba ~15-20 s de carga y el subtítulo en el idioma pedido
-    llegaba mucho después que el original.
-
-    Whisper no se precarga porque cada trabajo construye su propio adaptador y
-    el modelo no se comparte; cargarlo aquí no ahorraría nada.
-    """
     try:
         from app.infrastructure.translation.m2m100_translation_adapter import (
             M2M100TranslatorAdapter,
@@ -322,12 +250,6 @@ def _preload_models_sync() -> None:
 
 
 def _purge_media_temp() -> None:
-    """Borra los medios materializados. Nunca lanza: es limpieza.
-
-    Se hace en un hilo aparte porque en Windows el archivo puede seguir
-    retenido por el FFmpeg que acaba de terminar; así el worker no se queda
-    esperando y el borrado se reintenta hasta que el sistema lo libera.
-    """
     try:
         temp_root = Path(str(get_settings().paths.data_temp_dir))
     except Exception:  # noqa: BLE001
@@ -347,8 +269,6 @@ def _purge_media_temp() -> None:
 
 def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
     tracker = ProgressTracker()
-    # Se parte del historial ya persistido (p. ej. la entrada QUEUED que escribió
-    # `enqueue`) para no perder ninguna transición previa al arrancar el job.
     try:
         history: list[dict[str, Any]] = json.loads(str(job["stage_history"] or "[]"))
     except (json.JSONDecodeError, KeyError, TypeError):
@@ -408,12 +328,10 @@ def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
     pipeline.cancel_event = _CANCEL.get(job_id)
     pipeline.progress_callback = _progress
 
-    # Con el original en Storage hay que bajarlo a un temporal para procesarlo.
     temp_root = Path(str(settings.paths.data_temp_dir))
     remote = media_store.is_remote(project["media_path"])
     local_media: Path | None = None
     try:
-        # Se prefiere la copia que dejó la subida: evita descargar de Storage.
         local_media = media_store.find_pending(temp_root, str(project["id"])) or (
             media_store.materialize(project["media_path"], temp_root, label=job_id)
         )
@@ -443,7 +361,6 @@ def _run_job_full(conn: Any, job_id: str, job: Any, project: Any) -> None:
 
     status = str(results.get("status") or "SUCCESS")
 
-    # Persistir el idioma realmente detectado por T05.
     detected = str(results.get("detected_language") or "").strip().lower()
     if detected:
         db.run(
@@ -498,23 +415,7 @@ def _store_cues(conn: Any, project_id: str, output_dir: Path) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Procesamiento progresivo
-# ---------------------------------------------------------------------------
-
-
 def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None:
-    """El job progresivo ES el proceso del proyecto (`live`): se engancha a él.
-
-    Ese proceso arranca en cuanto termina la subida y es el mismo que alimenta
-    al reproductor (prioriza lo que se está viendo y completa el vídeo entero en
-    todos los idiomas). Aquí sólo se espera a que termine y se cierra el job.
-
-    Antes este job ejecutaba OTRA cadena con sus propios modelos, en paralelo con
-    la del reproductor: el vídeo se transcribía dos veces, ambas competían por la
-    CPU y escribían las mismas pistas, y el primer subtítulo llegaba a los ~34 s
-    de subir el vídeo (medido en el job a9c964ea).
-    """
     from app.presentation.api import live
 
     _ = job

@@ -1,10 +1,3 @@
-"""Tests unitarios T15 — Infrastructure M2M100 adapter + adaptación doblaje.
-
-- Loader: modelo ausente / incompleto / correcto (fake settings).
-- Translator: fake engine para traducir; carga real offline.
-- Adaptación: reglas de doblaje (normalización, cps, ratio, warnings).
-- AST: ausencia de requests/urllib/tokens/descargas.
-"""
 from __future__ import annotations
 
 import ast
@@ -36,7 +29,6 @@ class _FakeModel:
     def generate(self, **kwargs):
         self.calls += 1
         lang = kwargs.get("forced_bos_token_id")
-        # devolvemos un tensor de tokens ficticio
         import torch
         out = f"TRAD:{lang}"
         return torch.tensor([[1, 2, 3]])
@@ -71,11 +63,6 @@ def _loader_for(tmp_path: Path) -> M2M100TranslationModelLoader:
     )
 
 
-# =============================================================================
-# Loader
-# =============================================================================
-
-
 class TestM2M100Loader:
     def test_modelo_ausente(self, tmp_path):
         loader = _loader_for(tmp_path)
@@ -100,30 +87,22 @@ class TestM2M100Loader:
         d = tmp_path / MODEL_FOLDERNAME
         d.mkdir(parents=True, exist_ok=True)
         for f in REQUIRED_FILES:
-            (d / f).write_bytes(b"")  # vacío
+            (d / f).write_bytes(b"")
         loader = _loader_for(tmp_path)
         with pytest.raises(ModelLoadError):
             loader.validate()
 
     def test_path_traversal_no_permitido(self, tmp_path):
-        # el loader resuelve dentro de models_cache_dir; un models_cache_dir
-        # externo no debería alterar la resolución
         _mk_models_dir(tmp_path)
         loader = _loader_for(tmp_path)
         d = loader._model_dir()
         assert str(d).startswith(str(tmp_path.resolve()))
 
 
-# =============================================================================
-# Translator (con loader fake de transformers)
-# =============================================================================
-
-
 class TestM2M100Translator:
     def test_traduce(self, tmp_path):
         _mk_models_dir(tmp_path)
         loader = _loader_for(tmp_path)
-        # sobreescribir load() para devolver fakes sin cargar transformers
         loader.load = Mock(return_value=(_FakeModel(), _FakeTokenizer()))
         adapter = M2M100TranslatorAdapter(model_loader=loader)
         out = adapter.translate(
@@ -161,11 +140,6 @@ class TestM2M100Translator:
         assert adapter._do_sample is False
 
 
-# =============================================================================
-# Adaptación para doblaje
-# =============================================================================
-
-
 class TestTranslationAdaptation:
     def test_normaliza(self):
         r = TranslationAdaptationRule().adapt(
@@ -184,7 +158,6 @@ class TestTranslationAdaptation:
             duration_ms=100,
             target_language="es",
         )
-        # no trunca: conserva el texto completo
         assert len(r.adapted_text) == len(
             "Esta es una traducción muy larga que no cabe en el tiempo"
         )
@@ -229,8 +202,6 @@ class TestTranslationAdaptation:
         assert not r.adapted_text.startswith("Bueno, ")
 
     def test_no_elimina_si_cambia_sentido(self):
-        # "well" al inicio puede ser adverbio; nuestra lista solo elimina
-        # "well, " con coma al inicio (muletilla inequívoca)
         r = TranslationAdaptationRule().adapt(
             translated_text="Well done!",
             source_text="Well done!",
@@ -240,16 +211,10 @@ class TestTranslationAdaptation:
         assert "Well done" in r.adapted_text
 
     def test_conserva_timestamps_no_modificables(self):
-        # la adaptación solo produce texto; no toca timestamps
         r = TranslationAdaptationRule().adapt(
             translated_text="hola", source_text="hi", duration_ms=1000, target_language="es"
         )
         assert isinstance(r, AdaptationResult)
-
-
-# =============================================================================
-# AST / Seguridad / Offline
-# =============================================================================
 
 
 class TestTranslationOfflineSafety:
@@ -271,7 +236,6 @@ class TestTranslationOfflineSafety:
         assert "transformers" not in src
 
     def test_offline_env_no_rompe_import(self):
-        # con HF_HUB_OFFLINE no debe fallar el import del módulo
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
         import importlib
@@ -298,6 +262,5 @@ class TestDegenerateOutput:
         loader = _loader_for(tmp_path)
         loader.load = Mock(return_value=(model, _FakeTokenizer()))
         adapter = M2M100TranslatorAdapter(model_loader=loader)
-        # fake tokenizer devuelve 'Resultado traducido' -> no degenerado
         out = adapter.translate(source_text="Hola", source_language="en", target_language="es")
         assert out == "Resultado traducido"
