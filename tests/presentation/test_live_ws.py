@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.presentation.api import db, live
 from app.presentation.api.main import create_app
+from tests.fixtures.accounts import sign_up
 
 SR = 16_000
 DURATION = 60_000
@@ -69,8 +70,8 @@ def setup(tmp_path, monkeypatch):
 
 
 def _register(client: TestClient, email: str) -> str:
-    response = client.post(
-        "/api/auth/register",
+    response = sign_up(
+        client,
         json={"name": "Usuario Prueba", "email": email, "password": "password123", "confirm": "password123"},
     )
     assert response.status_code == 200, response.text

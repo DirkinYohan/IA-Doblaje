@@ -5,6 +5,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.fixtures.accounts import sign_up
 
 
 @pytest.fixture(scope="module")
@@ -27,8 +28,8 @@ def client(tmp_path_factory: pytest.TempPathFactory):
 @pytest.fixture(scope="module")
 def job(client: TestClient) -> dict[str, str]:
     """Usuario con un job real en PENDING (creado al subir el medio)."""
-    response = client.post(
-        "/api/auth/register",
+    response = sign_up(
+        client,
         json={"name": "Ticket", "email": "ticket@example.com", "password": "password123", "confirm": "password123"},
     )
     assert response.status_code == 200, response.text

@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.fixtures.mailbox import wait_for_mail
+from tests.fixtures.accounts import sign_up
 
 
 @pytest.fixture()
@@ -24,8 +25,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 
 def test_registro_login_logout_y_reset(client: TestClient, tmp_path: Path) -> None:
-    reg = client.post(
-        "/api/auth/register",
+    reg = sign_up(
+        client,
         json={"name": "Ada", "email": "ada@example.com", "password": "secreto123", "confirm": "secreto123"},
     )
     assert reg.status_code == 200
@@ -47,8 +48,8 @@ def test_registro_login_logout_y_reset(client: TestClient, tmp_path: Path) -> No
 
 def test_ruta_protegida_y_export(client: TestClient) -> None:
     assert client.get("/api/videos").status_code == 401
-    client.post(
-        "/api/auth/register",
+    sign_up(
+        client,
         json={"name": "Ada", "email": "ada@example.com", "password": "secreto123", "confirm": "secreto123"},
     )
     project = "proj-12345678"

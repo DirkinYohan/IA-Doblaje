@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.presentation.api.main import create_app
+from tests.fixtures.accounts import sign_up
 
 
 def _pcm_b64(samples: list[float]) -> str:
@@ -32,8 +33,8 @@ def _make_client(tmp_path, monkeypatch) -> TestClient:
 
 
 def _authenticate(client: TestClient) -> None:
-    response = client.post(
-        "/api/auth/register",
+    response = sign_up(
+        client,
         json={
             "name": "Tiempo Real",
             "email": "realtime@example.com",

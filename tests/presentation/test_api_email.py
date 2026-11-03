@@ -44,26 +44,60 @@ def _register(client: TestClient, email: str = "ada@example.com", locale: str = 
     return response.json()
 
 
-def test_al_registrarse_llega_el_correo_de_confirmacion(client: TestClient, mail_dir: Path) -> None:
-    user = _register(client)
-    assert user["email_verified"] is False
-    assert client.get("/api/auth/me").json()["email_verified"] is False
+def _login(client: TestClient, email: str = "ada@example.com", password: str = "secreto123"):
+    return client.post("/api/auth/login", json={"email": email, "password": password})
+
+
+def _confirm(client: TestClient, mail_dir: Path, email: str = "ada@example.com") -> None:
+    mail = wait_for_mail(mail_dir, "verify", email)
+    assert client.post("/api/auth/verify-email", json={"token": mail["token"]}).status_code == 200
+
+
+def test_no_se_entra_hasta_confirmar_el_correo(client: TestClient, mail_dir: Path) -> None:
+    assert _register(client) == {"status": "verify", "email": "ada@example.com"}
+    # Registrarse no abre sesión.
+    assert client.get("/api/auth/me").status_code == 401
+    assert "ia_session" not in client.cookies
 
     mail = wait_for_mail(mail_dir, "verify", "ada@example.com")
     assert mail["subject"] == "Confirma tu correo en IA Doblaje"
     assert mail["link"] == f"{PUBLIC}/verify-email?token={mail['token']}"
     assert "Hola Ada" in mail["html"] and mail["link"] in mail["html"]
 
-    # El enlace funciona sin sesión (puede abrirse en otro navegador).
-    client.post("/api/auth/logout")
+    blocked = _login(client)
+    assert blocked.status_code == 403 and "Confirma tu correo" in blocked.json()["detail"]
+    assert client.get("/api/auth/me").status_code == 401
+    # Con una contraseña incorrecta no se revela que la cuenta existe.
+    assert _login(client, password="incorrecta1").status_code == 401
+
     ok = client.post("/api/auth/verify-email", json={"token": mail["token"]})
     assert ok.status_code == 200 and ok.json() == {"ok": True, "email": "ada@example.com"}
+    assert client.get("/api/auth/me").status_code == 401, "confirmar no abre sesión: se entra con el login"
     assert client.post("/api/auth/verify-email", json={"token": mail["token"]}).status_code == 400, "un solo uso"
 
-    login = client.post("/api/auth/login", json={"email": "ada@example.com", "password": "secreto123"})
-    assert login.json()["email_verified"] is True
+    login = _login(client)
+    assert login.status_code == 200 and login.json()["email_verified"] is True
     assert client.get("/api/auth/me").json()["email_verified"] is True
-    assert client.post("/api/auth/resend-verification", json={}).json() == {"status": "verified"}
+
+
+def test_registrarse_otra_vez_sin_confirmar_reenvia_el_enlace(client: TestClient, mail_dir: Path) -> None:
+    _register(client)
+    first = wait_for_mail(mail_dir, "verify")
+    again = client.post("/api/auth/register", json={
+        "name": "Otra Persona", "email": "ada@example.com", "password": "distinta123", "confirm": "distinta123",
+    })
+    assert again.status_code == 200
+    second = wait_for_mail(mail_dir, "verify", count=2)
+    assert second["token"] != first["token"]
+    assert client.post("/api/auth/verify-email", json={"token": second["token"]}).status_code == 200
+    # La contraseña no cambió: no se había demostrado de quién era la cuenta.
+    assert _login(client, password="distinta123").status_code == 401
+    assert _login(client).status_code == 200
+    # Ya confirmada, el correo está ocupado.
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/register", json={
+        "name": "Ada", "email": "ada@example.com", "password": "secreto123", "confirm": "secreto123",
+    }).status_code == 409
 
 
 def test_enlaces_invalidos(client: TestClient) -> None:
@@ -72,55 +106,83 @@ def test_enlaces_invalidos(client: TestClient) -> None:
         assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 400
 
 
-def test_reenviar_y_limite(client: TestClient, mail_dir: Path) -> None:
+def test_reenviar_sin_sesion_y_limite(client: TestClient, mail_dir: Path) -> None:
     _register(client, locale="en")
     first = wait_for_mail(mail_dir, "verify")
     assert first["subject"] == "Confirm your email for IA Doblaje"
-    assert client.post("/api/auth/resend-verification", json={"locale": "es"}).json() == {"status": "sent"}
+    resent = client.post("/api/auth/resend-verification", json={"email": "ADA@example.com", "locale": "es"})
+    assert resent.json() == {"status": "sent"}
     second = wait_for_mail(mail_dir, "verify", count=2)
-    assert second["token"] != first["token"]
+    assert second["subject"] == "Confirma tu correo en IA Doblaje"
     # Cualquiera de los enlaces vigentes confirma; después ninguno vale.
     assert client.post("/api/auth/verify-email", json={"token": first["token"]}).status_code == 200
     assert client.post("/api/auth/verify-email", json={"token": second["token"]}).status_code == 400
 
-    _register(client, "otro@example.com")
-    for _ in range(3):
-        assert client.post("/api/auth/resend-verification", json={}).status_code == 200
-    assert client.post("/api/auth/resend-verification", json={}).status_code == 429
+    # Ya confirmada o desconocida: la misma respuesta y ningún correo.
+    before = len(read_mails(mail_dir))
+    for email in ["ada@example.com", "nadie@example.com"]:
+        assert client.post("/api/auth/resend-verification", json={"email": email}).json() == {"status": "sent"}
+    assert len(read_mails(mail_dir)) == before
+
+    for _ in range(2):
+        assert client.post("/api/auth/resend-verification", json={"email": "otro@example.com"}).status_code == 200
+    assert client.post("/api/auth/resend-verification", json={"email": "otro@example.com"}).status_code == 429
+
+
+def test_cambiar_de_correo_se_aplica_al_confirmarlo(client: TestClient, mail_dir: Path) -> None:
+    _register(client)
+    _confirm(client, mail_dir)
+    assert _login(client).status_code == 200
+    changed = client.post("/api/auth/change-email", json={"email": "ada@nuevo.com", "password": "secreto123"})
+    assert changed.json() == {"email": "ada@example.com", "pending_email": "ada@nuevo.com"}
+    # Hasta confirmarlo todo sigue igual: una errata no deja a nadie fuera.
+    assert client.get("/api/auth/me").json()["email"] == "ada@example.com"
     client.post("/api/auth/logout")
-    assert client.post("/api/auth/resend-verification", json={}).status_code == 401
+    assert _login(client).status_code == 200
 
-
-def test_cambiar_de_correo_obliga_a_confirmarlo(client: TestClient, mail_dir: Path) -> None:
-    _register(client)
-    old = wait_for_mail(mail_dir, "verify", "ada@example.com")
-    assert client.post("/api/auth/verify-email", json={"token": old["token"]}).status_code == 200
-    # Otro enlace pendiente para la dirección vieja.
-    client.post("/api/auth/change-email", json={"email": "ada@nuevo.com", "password": "secreto123"})
-    assert client.get("/api/auth/me").json()["email_verified"] is False
-    new = wait_for_mail(mail_dir, "verify", "ada@nuevo.com")
-    assert client.post("/api/auth/verify-email", json={"token": new["token"]}).status_code == 200
-    assert client.get("/api/auth/me").json() | {"email": "ada@nuevo.com", "email_verified": True} == client.get("/api/auth/me").json()
-
-
-def test_enlace_de_una_direccion_anterior_no_confirma_la_nueva(client: TestClient, mail_dir: Path) -> None:
-    _register(client)
-    old = wait_for_mail(mail_dir, "verify", "ada@example.com")
-    client.post("/api/auth/change-email", json={"email": "ada@nuevo.com", "password": "secreto123"})
-    assert client.post("/api/auth/verify-email", json={"token": old["token"]}).status_code == 400
-    assert client.get("/api/auth/me").json()["email_verified"] is False
-
-
-def test_recuperar_contrasena_envia_el_enlace(client: TestClient, mail_dir: Path) -> None:
-    _register(client)
+    _confirm(client, mail_dir, "ada@nuevo.com")
+    me = client.get("/api/auth/me").json()
+    assert me["email"] == "ada@nuevo.com" and me["email_verified"] is True
     client.post("/api/auth/logout")
+    assert _login(client).status_code == 401
+    assert _login(client, "ada@nuevo.com").status_code == 200
+
+
+def test_un_enlace_viejo_no_devuelve_la_cuenta_a_otra_direccion(client: TestClient, mail_dir: Path) -> None:
+    _register(client)
+    _confirm(client, mail_dir)
+    _login(client)
+    client.post("/api/auth/change-email", json={"email": "uno@nuevo.com", "password": "secreto123"})
+    client.post("/api/auth/change-email", json={"email": "dos@nuevo.com", "password": "secreto123"})
+    one = wait_for_mail(mail_dir, "verify", "uno@nuevo.com")
+    two = wait_for_mail(mail_dir, "verify", "dos@nuevo.com")
+    assert client.post("/api/auth/verify-email", json={"token": two["token"]}).status_code == 200
+    assert client.post("/api/auth/verify-email", json={"token": one["token"]}).status_code == 400
+    assert client.get("/api/auth/me").json()["email"] == "dos@nuevo.com"
+
+
+def test_no_se_puede_cambiar_a_un_correo_ocupado(client: TestClient, mail_dir: Path) -> None:
+    _register(client, "otra@example.com")
+    _confirm(client, mail_dir, "otra@example.com")
+    _register(client)
+    _confirm(client, mail_dir)
+    _login(client)
+    assert client.post(
+        "/api/auth/change-email", json={"email": "otra@example.com", "password": "secreto123"}
+    ).status_code == 409
+
+
+def test_recuperar_contrasena_envia_el_enlace_y_confirma_el_correo(client: TestClient, mail_dir: Path) -> None:
+    # Aún sin confirmar: abrir el enlace del correo también lo demuestra.
+    _register(client)
     assert client.post("/api/auth/forgot-password", json={"email": "ADA@example.com ", "locale": "es"}).status_code == 200
     mail = wait_for_mail(mail_dir, "reset", "ada@example.com")
     assert mail["subject"] == "Recupera tu contraseña de IA Doblaje"
     assert mail["link"] == f"{PUBLIC}/reset-password?token={mail['token']}"
     reset = client.post("/api/auth/reset-password", json={"token": mail["token"], "password": "nueva12345", "confirm": "nueva12345"})
     assert reset.status_code == 200
-    assert client.post("/api/auth/login", json={"email": "ada@example.com", "password": "nueva12345"}).status_code == 200
+    login = _login(client, password="nueva12345")
+    assert login.status_code == 200 and login.json()["email_verified"] is True
 
 
 def test_correo_desconocido_misma_respuesta_y_sin_envio(client: TestClient, mail_dir: Path) -> None:
@@ -208,7 +270,7 @@ def test_un_fallo_de_envio_no_rompe_el_registro(client: TestClient) -> None:
             raise RuntimeError("caído")
 
     client.app.state.mailer = Broken()
-    assert _register(client)["email_verified"] is False
+    assert _register(client) == {"status": "verify", "email": "ada@example.com"}
 
 
 def test_las_pruebas_nunca_envian_correos_reales(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

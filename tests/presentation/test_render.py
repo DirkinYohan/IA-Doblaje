@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from app.infrastructure.subtitles.exporters import to_ass_burn
 from app.presentation.api import db, render
 from app.presentation.api.main import create_app
+from tests.fixtures.accounts import sign_up
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="falta FFmpeg")
 
@@ -178,7 +179,7 @@ def api(tmp_path: Path, monkeypatch, clip: Path):
 
 
 def _user(client: TestClient, email: str) -> str:
-    r = client.post("/api/auth/register", json={
+    r = sign_up(client, json={
         "name": "Usuario Prueba", "email": email, "password": "password123", "confirm": "password123",
     })
     assert r.status_code == 200, r.text

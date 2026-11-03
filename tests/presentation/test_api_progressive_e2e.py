@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.fixtures.accounts import sign_up
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -94,8 +95,8 @@ def prepared(worker_client: TestClient, clip: Path) -> dict[str, str]:
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"M2M100 no disponible en este entorno: {type(exc).__name__}: {exc}")
 
-    register = worker_client.post(
-        "/api/auth/register",
+    register = sign_up(
+        worker_client,
         json={
             "name": "Progresivo E2E",
             "email": "progresivo@example.com",
@@ -333,8 +334,8 @@ class TestRealtimeEvents:
         self, worker_client: TestClient, prepared: dict[str, str]
     ) -> None:
         worker_client.post("/api/auth/logout")
-        worker_client.post(
-            "/api/auth/register",
+        sign_up(
+            worker_client,
             json={
                 "name": "Ajeno",
                 "email": "ajeno@example.com",

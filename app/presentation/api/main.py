@@ -306,7 +306,7 @@ def create_app() -> FastAPI:
     app.state.login_limit = RateLimiter(10, 60)
     app.state.register_limit = RateLimiter(5, 60)
     app.state.forgot_limit = RateLimiter(5, 300)
-    app.state.verify_limit = RateLimiter(3, 600)
+    app.state.verify_limit = RateLimiter(5, 600)
     app.state.mailer = mailer.from_env(paths["mail"])
     # Restos de un cierre abrupto: los medios materializados de Storage no
     # deben sobrevivir a un reinicio.
@@ -431,7 +431,7 @@ def create_app() -> FastAPI:
         }
 
     def send_verification(user_id: str, name: str, email: str, locale: str) -> None:
-        """Enlace de confirmación para la dirección ACTUAL del usuario."""
+        """Enlace para confirmar `email`: la del registro o la nueva al cambiarla."""
         token = new_token()
         expires = datetime.now(timezone.utc) + timedelta(hours=48)
         db.run(
@@ -446,7 +446,7 @@ def create_app() -> FastAPI:
         mailer.send_in_background(app.state.mailer, mail)
 
     @app.post("/api/auth/register")
-    async def register(request: Request, response: Response) -> dict[str, Any]:
+    async def register(request: Request) -> dict[str, Any]:
         if not app.state.register_limit.allow(client_key(request)):
             raise HTTPException(status_code=429, detail="Demasiados registros")
         body = await request.json()
@@ -456,17 +456,24 @@ def create_app() -> FastAPI:
         confirm = str(body.get("confirm") or "")
         if len(name) < 2 or "@" not in email or len(password) < 8 or password != confirm:
             raise HTTPException(status_code=422, detail="Datos de registro inválidos")
-        if db.one(conn, "SELECT id FROM users WHERE email=?", (email,)):
+        locale = mailer.locale_of(body.get("locale"))
+        existing = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
+        if existing is not None and existing["email_verified_at"]:
             raise HTTPException(status_code=409, detail="El email ya está registrado")
+        if existing is not None:
+            # Registrado pero sin confirmar: se reenvía el enlace (sin tocar la
+            # contraseña, que no se ha demostrado de quién es).
+            send_verification(existing["id"], existing["name"], email, locale)
+            return {"status": "verify", "email": email}
         user_id = str(uuid.uuid4())
         db.run(
             conn,
             "INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
             (user_id, name, email, hash_password(password), _now()),
         )
-        set_session(response, user_id, False)
-        send_verification(user_id, name, email, mailer.locale_of(body.get("locale")))
-        return public_user(db.one(conn, "SELECT * FROM users WHERE id=?", (user_id,)))
+        # Sin sesión: no se entra hasta confirmar el correo con el enlace.
+        send_verification(user_id, name, email, locale)
+        return {"status": "verify", "email": email}
 
     @app.post("/api/auth/login")
     async def login(request: Request, response: Response) -> dict[str, Any]:
@@ -479,6 +486,9 @@ def create_app() -> FastAPI:
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
         if row is None or not verify_password(password, row["password_hash"]):
             raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+        # Después de comprobar la contraseña: así no revela qué cuentas existen.
+        if not row["email_verified_at"]:
+            raise HTTPException(status_code=403, detail="Confirma tu correo para iniciar sesión")
         set_session(response, row["id"], remember)
         return public_user(row)
 
@@ -525,26 +535,35 @@ def create_app() -> FastAPI:
             (token_hash(token), _now()),
         ) if token else None
         user = db.one(conn, "SELECT * FROM users WHERE id=?", (row["user_id"],)) if row else None
-        # Un enlace para una dirección que ya no es la de la cuenta no vale.
-        if row is None or user is None or user["email"] != row["email"]:
+        if row is None or user is None:
             raise HTTPException(status_code=400, detail="Enlace inválido o vencido")
-        if not user["email_verified_at"]:
-            db.run(conn, "UPDATE users SET email_verified_at=? WHERE id=?", (_now(), user["id"]))
-        db.run(conn, "UPDATE email_tokens SET used=1 WHERE user_id=? AND email=?", (user["id"], user["email"]))
-        return {"ok": True, "email": user["email"]}
+        email = row["email"]
+        # Un cambio de correo se aplica al confirmar la dirección nueva.
+        if email != user["email"]:
+            taken = db.one(conn, "SELECT id FROM users WHERE email=? AND id<>?", (email, user["id"]))
+            if taken is not None:
+                raise HTTPException(status_code=409, detail="El email ya está registrado")
+        db.run(
+            conn,
+            "UPDATE users SET email=?, email_verified_at=? WHERE id=?",
+            (email, user["email_verified_at"] or _now(), user["id"]),
+        )
+        # El resto de enlaces pendientes deja de valer: uno viejo no debe
+        # poder devolver la cuenta a una dirección anterior.
+        db.run(conn, "UPDATE email_tokens SET used=1 WHERE user_id=?", (user["id"],))
+        return {"ok": True, "email": email}
 
     @app.post("/api/auth/resend-verification")
-    async def resend_verification(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
-        row = user_from_cookie(ia_session)
-        if row["email_verified_at"]:
-            return {"status": "verified"}
-        if not app.state.verify_limit.allow(row["id"]):
+    async def resend_verification(request: Request) -> dict[str, str]:
+        """Otro enlace de confirmación. Sin sesión: aún no se puede entrar."""
+        body = await request.json()
+        email = str(body.get("email") or "").strip().lower()
+        if not app.state.verify_limit.allow(client_key(request)) or not app.state.verify_limit.allow(f"mail:{email}"):
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes")
-        try:
-            body = await request.json()
-        except Exception:  # noqa: BLE001 - cuerpo opcional
-            body = {}
-        send_verification(row["id"], row["name"], row["email"], mailer.locale_of(body.get("locale")))
+        row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,)) if email else None
+        if row is not None and not row["email_verified_at"]:
+            send_verification(row["id"], row["name"], row["email"], mailer.locale_of(body.get("locale")))
+        # La misma respuesta en todos los casos: no revela qué correos existen.
         return {"status": "sent"}
 
     @app.post("/api/auth/reset-password")
@@ -563,6 +582,10 @@ def create_app() -> FastAPI:
         if row is None:
             raise HTTPException(status_code=400, detail="Token inválido o vencido")
         db.run(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["user_id"]))
+        # Abrir el enlace del correo también demuestra que la dirección es suya.
+        db.run(
+            conn, "UPDATE users SET email_verified_at=? WHERE id=? AND email_verified_at=''", (_now(), row["user_id"])
+        )
         db.run(conn, "UPDATE reset_tokens SET used=1 WHERE token_hash=?", (token_hash(token),))
         db.run(conn, "DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
         return {"ok": True}
@@ -591,10 +614,12 @@ def create_app() -> FastAPI:
         taken = db.one(conn, "SELECT id FROM users WHERE email=? AND id<>?", (email, row["id"]))
         if taken is not None:
             raise HTTPException(status_code=409, detail="El email ya está registrado")
-        # La dirección nueva hay que confirmarla de nuevo.
-        db.run(conn, "UPDATE users SET email=?, email_verified_at='' WHERE id=?", (email, row["id"]))
+        if email == row["email"]:
+            return {"email": email, "pending_email": ""}
+        # El cambio se aplica al confirmar la dirección nueva: hasta entonces
+        # se sigue entrando con la actual (y una errata no deja fuera a nadie).
         send_verification(row["id"], row["name"], email, mailer.locale_of(body.get("locale")))
-        return {"email": email}
+        return {"email": row["email"], "pending_email": email}
 
     @app.post("/api/auth/change-password")
     async def change_password(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, bool]:

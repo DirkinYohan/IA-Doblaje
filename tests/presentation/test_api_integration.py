@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import PROJECT_ROOT
 from app.presentation.api import db
+from tests.fixtures.accounts import sign_up
 
 pytestmark = pytest.mark.integration
 
@@ -93,8 +94,8 @@ def _unlimited_rate_limits(client: TestClient):
 
 @pytest.fixture(scope="module")
 def auth(client: TestClient) -> dict[str, str]:
-    response = client.post(
-        "/api/auth/register",
+    response = sign_up(
+        client,
         json={
             "name": "Prueba Integración",
             "email": "integracion@example.com",
@@ -213,12 +214,23 @@ class TestUserProfile:
             json={"email": "nuevo@example.com", "password": "password123"},
         )
         assert ok.status_code == 200
+        assert ok.json()["pending_email"] == "nuevo@example.com"
+        # El cambio se aplica al confirmar la dirección nueva.
+        assert client.get("/api/auth/me").json()["email"] == auth["email"]
+        from tests.fixtures.mailbox import wait_for_mail
+
+        mail_dir = Path(os.environ["IA_MAIL_DIR"])
+        token = wait_for_mail(mail_dir, "verify", "nuevo@example.com")["token"]
+        assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
         assert client.get("/api/auth/me").json()["email"] == "nuevo@example.com"
         # Se restaura para los demás tests.
         assert client.post(
             "/api/auth/change-email",
             json={"email": auth["email"], "password": "password123"},
         ).status_code == 200
+        token = wait_for_mail(mail_dir, "verify", auth["email"], count=2)["token"]
+        assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
+        assert client.get("/api/auth/me").json()["email"] == auth["email"]
 
     def test_preflight_refleja_el_motor(self, client: TestClient, auth: dict[str, str]) -> None:
         response = client.get("/api/system/preflight")
@@ -461,8 +473,8 @@ class TestJobStates:
                 data={"source_language": "en", "target_languages": "es"},
             ).json()
         client.post("/api/auth/logout")
-        other = client.post(
-            "/api/auth/register",
+        other = sign_up(
+            client,
             json={
                 "name": "Intruso",
                 "email": "intruso@example.com",
