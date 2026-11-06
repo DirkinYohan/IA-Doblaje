@@ -45,12 +45,3 @@ docs/
 # Docker files locales
 docker-compose.override.yml
 Dockerfile.local
-
-# Sólo hace falta app/, configs/ y los scripts de modelos
-tests/
-tools/
-.claude/
-*.txt
-!requirements-deploy.txt
-.env.*
-!.env.example
