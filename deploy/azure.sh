@@ -74,6 +74,11 @@ ENV_VARS=(
   "CORS_ORIGINS=$PUBLIC_URL"
   "IA_DB_POOL_SIZE=3"
 )
+# URL pública del propio backend: el navegador descarga de aquí sin pasar por Vercel.
+EXISTING_FQDN=$(az containerapp show --name "$APP" --resource-group "$RG"   --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || true)
+if [ -n "$EXISTING_FQDN" ]; then
+  ENV_VARS+=("IA_PUBLIC_API_URL=https://$EXISTING_FQDN")
+fi
 
 if az containerapp show --name "$APP" --resource-group "$RG" --output none 2>/dev/null; then
   az containerapp secret set --name "$APP" --resource-group "$RG" --secrets "${SECRETS[@]}" --output none
@@ -88,6 +93,8 @@ else
     --image "$IMAGE" --cpu 2 --memory 4Gi --min-replicas 0 --max-replicas 1 \
     --ingress external --target-port 10000 --transport auto \
     --secrets "${SECRETS[@]}" --env-vars "${ENV_VARS[@]}" --output none
+  NEW_FQDN=$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.configuration.ingress.fqdn -o tsv)
+  az containerapp update --name "$APP" --resource-group "$RG"     --set-env-vars "IA_PUBLIC_API_URL=https://$NEW_FQDN" --output none
 fi
 
 FQDN=$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.configuration.ingress.fqdn -o tsv)

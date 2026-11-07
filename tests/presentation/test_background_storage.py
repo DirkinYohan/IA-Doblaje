@@ -184,3 +184,46 @@ def test_margen_del_modo_en_vivo() -> None:
     sub.failed.add("es")
     assert sub.buffered_ms() == 120_000
     assert live.head_start_ready("proyecto-sin-runner") is True
+
+
+def test_mientras_se_guarda_redirige_directo_al_backend(
+    client: TestClient, storage: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("IA_PUBLIC_API_URL", "https://api.example")
+    upload = client.post(
+        "/api/videos",
+        files={"file": ("b.wav", PAYLOAD, "audio/wav")},
+        data={"source_language": "en", "target_languages": "es"},
+    )
+    project_id = upload.json()["id"]
+    assert storage["started"].wait(5)  # type: ignore[union-attr]
+
+    media = client.get(f"/api/videos/{project_id}/media", follow_redirects=False)
+    assert media.status_code == 307
+    link = media.headers["location"]
+    assert link.startswith(f"https://api.example/api/videos/{project_id}/media/local?exp=")
+
+    anonymous = TestClient(client.app)
+    path = link.removeprefix("https://api.example")
+    direct = anonymous.get(path, headers={"Range": "bytes=0-3"}, follow_redirects=False)
+    assert direct.status_code == 206 and direct.content == b"RIFF"
+    assert anonymous.get(path.replace("sig=", "sig=0"), follow_redirects=False).status_code == 403
+
+    storage["release"].set()  # type: ignore[union-attr]
+    for thread in threading.enumerate():
+        if thread.name == f"store-{project_id[:8]}":
+            thread.join(10)
+    stored = client.get(f"/api/videos/{project_id}/media", follow_redirects=False)
+    assert stored.status_code == 307
+    assert stored.headers["location"] == "https://storage.example/firmada"
+    assert anonymous.get(path, follow_redirects=False).headers["location"] == "https://storage.example/firmada"
+
+
+def test_enlace_caducado() -> None:
+    import time
+
+    expires = int(time.time()) + 10
+    signature = media_upload._signature("p9", expires)
+    assert media_upload.link_valid("p9", expires, signature)
+    assert not media_upload.link_valid("p9", expires, signature, now=expires + 1)
+    assert not media_upload.link_valid("otro", expires, signature)

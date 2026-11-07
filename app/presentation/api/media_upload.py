@@ -7,7 +7,11 @@ que se hace en un hilo; mientras tanto el vídeo se sirve desde la copia local.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
+import secrets
 import threading
 import time
 from collections.abc import Callable
@@ -20,6 +24,9 @@ from app.presentation.api import storage_fit
 log = logging.getLogger("ia.media_upload")
 
 ATTEMPTS = 2
+LINK_TTL_S = 6 * 3600
+# Solo hay una réplica y la copia local muere con ella: basta un secreto por proceso.
+_LINK_KEY = secrets.token_bytes(32)
 HEAD_START_WAIT_S = 120.0
 POLL_S = 2.0
 
@@ -134,3 +141,32 @@ def _delete(key: Any) -> None:
         media_store.delete(key)
     except Exception:  # noqa: BLE001
         pass
+
+
+def public_api_base() -> str:
+    """URL pública del backend para que el navegador descargue sin pasar por Vercel."""
+    explicit = os.environ.get("IA_PUBLIC_API_URL", "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    host = os.environ.get("CONTAINER_APP_HOSTNAME", "").strip()
+    return f"https://{host}" if host else ""
+
+
+def _signature(project_id: str, expires: int) -> str:
+    message = f"{project_id}:{expires}".encode()
+    return hmac.new(_LINK_KEY, message, hashlib.sha256).hexdigest()
+
+
+def local_link(project_id: str, *, now: float | None = None) -> str:
+    """Enlace firmado y temporal a la copia local; vacío si no hay URL pública."""
+    base = public_api_base()
+    if not base:
+        return ""
+    expires = int((now or time.time()) + LINK_TTL_S)
+    return f"{base}/api/videos/{project_id}/media/local?exp={expires}&sig={_signature(project_id, expires)}"
+
+
+def link_valid(project_id: str, expires: int, signature: str, *, now: float | None = None) -> bool:
+    if expires < (now or time.time()):
+        return False
+    return hmac.compare_digest(_signature(project_id, int(expires)), str(signature))

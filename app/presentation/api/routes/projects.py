@@ -271,8 +271,12 @@ def build(ctx: ApiContext) -> APIRouter:
         media_path = project["media_path"]
 
         if media_store.is_remote(media_path):
-            local = media_store.find_pending(paths["temp"], project_id)
+            local = media_store.staged(project_id)
             if local is not None:
+                # Aún se está guardando en Storage: directo al backend, sin el proxy de Vercel.
+                link = media_upload.local_link(project_id)
+                if link:
+                    return RedirectResponse(link, status_code=307)
                 return FileResponse(local, media_type=_guess_mime(local.name))
             url = media_store.signed_url(media_path, expires_in=3600)
             if url:
@@ -283,6 +287,19 @@ def build(ctx: ApiContext) -> APIRouter:
         if not path.is_file() or not str(path).startswith(str(paths["input"].resolve())):
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         return FileResponse(path)
+
+    @router.get("/api/videos/{project_id}/media/local")
+    def media_local(project_id: str, exp: int, sig: str) -> FileResponse:
+        if not media_upload.link_valid(project_id, exp, sig):
+            raise HTTPException(status_code=403, detail="Enlace caducado")
+        local = media_store.staged(project_id)
+        if local is not None:
+            return FileResponse(local, media_type=_guess_mime(local.name))
+        project = db.one(conn, "SELECT media_path FROM projects WHERE id=?", (project_id,))
+        url = media_store.signed_url(project["media_path"], expires_in=3600) if project else None
+        if url:
+            return RedirectResponse(url, status_code=307)
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
     @router.get("/api/videos/{project_id}/audio-check")
     def audio_check(project_id: str, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
