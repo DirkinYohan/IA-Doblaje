@@ -86,4 +86,8 @@ def create_app() -> FastAPI:
     ctx = build_context(app, conn, paths, settings)
     for module in (auth, system, projects, subtitles, jobs, render, live):
         app.include_router(module.build(ctx))
+    if app.state.worker_enabled:
+        # Al despertar el servidor: los modelos cargan mientras el usuario entra,
+        # no cuando pulsa play.
+        ctx._warm_live_models()
     return app

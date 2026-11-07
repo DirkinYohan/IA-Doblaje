@@ -17,6 +17,8 @@ log = logging.getLogger("ia.live")
 LOOKAHEAD_MS = 120_000
 WINDOW_MS = 24_000
 NEAR_WINDOW_MS = 12_000
+# Con menos margen que esto se trabaja en tramos cortos: llegan antes al reproductor.
+NEAR_LEAD_MS = 20_000
 EDGE_MS = 400
 BACKOFF_MS = 1_500
 TRANSLATE_CHUNK_MS = 30_000
@@ -261,7 +263,7 @@ class LiveSubtitler:
         start = gap_start
         if start == position and not ranges.contains(position - 1):
             start = max(ranges.end_before(position), position - BACKOFF_MS, 0)
-        size = NEAR_WINDOW_MS if near and start <= position + 1_000 else WINDOW_MS
+        size = NEAR_WINDOW_MS if near and start < position + NEAR_LEAD_MS else WINDOW_MS
         end = min(gap_end, start + size, self.duration_ms)
         soft_edge = end == start + size and end < self.duration_ms and end < gap_end
 
