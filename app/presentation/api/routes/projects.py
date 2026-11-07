@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 
 from app.presentation.api import db
 from app.presentation.api import media_store
+from app.presentation.api import storage_fit
 from app.presentation.api.common import OFFICIAL
 from app.presentation.api.common import UPLOAD_CHUNK
 from app.presentation.api.common import _create_job
@@ -145,12 +146,26 @@ def build(ctx: ApiContext) -> APIRouter:
         duration_ms = _probe_duration_ms(target)
 
         if use_storage:
-            media_key = f"{row['id']}/{project_id}/{filename}"
+            stored_name = filename
+            try:
+                fitted = storage_fit.fit(target, duration_ms, target.with_name(f"{project_id}-fit.mp4"))
+            except storage_fit.TooLongForStorage as exc:
+                target.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail=str(exc)) from exc
+            except Exception as exc:
+                target.unlink(missing_ok=True)
+                target.with_name(f"{project_id}-fit.mp4").unlink(missing_ok=True)
+                _raise_engine_error("No se pudo comprimir el vídeo", exc)
+            if fitted != target:
+                target.unlink(missing_ok=True)
+                target = fitted
+                stored_name = f"{Path(filename).stem}.mp4"
+            media_key = f"{row['id']}/{project_id}/{stored_name}"
             thumb_key = f"{row['id']}/{project_id}/thumbnail.jpg"
             thumb_temp = paths["temp"] / "uploads" / f"{project_id}-thumbnail.jpg"
             has_thumb = _write_thumbnail(target, thumb_temp)
             try:
-                media_store.upload_file(target, media_key, _guess_mime(filename))
+                media_store.upload_file(target, media_key, _guess_mime(stored_name))
                 if has_thumb:
                     media_store.upload_bytes(
                         thumb_temp.read_bytes(), thumb_key, "image/jpeg"

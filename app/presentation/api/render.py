@@ -336,13 +336,23 @@ def _beat(progress: _Progress, stop: threading.Event) -> None:
             pass
 
 
-def _store_remote(project: Any, language: str, video: Path) -> str | None:
+def _store_remote(project: Any, language: str, video: Path, duration_ms: int) -> str | None:
     from app.presentation.api import media_store
+    from app.presentation.api import storage_fit
 
     if not media_store.configured():
         return None
+    try:
+        fitted = storage_fit.fit(video, duration_ms, video.with_name(f"{language}.fit.mp4"))
+    except storage_fit.TooLongForStorage:
+        log.warning("render[%s/%s]: no cabe en el almacenamiento; queda solo en local", str(project["id"])[:8], language)
+        return None
     key = f"{project['user_id']}/{project['id']}/renders/{language}.mp4"
-    media_store.upload_file(video, key, "video/mp4")
+    try:
+        media_store.upload_file(fitted, key, "video/mp4")
+    finally:
+        if fitted != video:
+            fitted.unlink(missing_ok=True)
     return media_store.make_uri(os.environ.get("SUPABASE_BUCKET", "media"), key)
 
 
@@ -389,7 +399,7 @@ def start(
                 burn(source, ass, video, duration_ms=duration_ms,
                      on_progress=lambda value: progress.set(base + value * (100 - base) // 100))
                 meta.write_text(json.dumps({"stamp": stamp, "language": language}), encoding="utf-8")
-                remote = _store_remote(project, language, video)
+                remote = _store_remote(project, language, video, duration_ms)
                 progress.value = 100
                 progress.save(state="done", storage_key=remote or "", force=True)
                 log.info("render[%s/%s]: listo en %.1fs", project_id[:8], language, time.monotonic() - started)
