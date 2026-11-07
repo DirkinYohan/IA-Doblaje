@@ -100,12 +100,13 @@ def test_websocket_rechaza_mensaje_desconocido(tmp_path, monkeypatch) -> None:
 
 @pytest.fixture
 def stub_transcriber(monkeypatch):
-    import app.presentation.api.main as main_module
+    import app.presentation.api.common as common_module
+    import app.presentation.api.routes.live as live_module
 
     stub = _StubTranscriber()
-    monkeypatch.setattr(main_module, "whisper_transcriber", lambda _adapter: stub)
+    monkeypatch.setattr(live_module, "whisper_transcriber", lambda _adapter: stub)
     monkeypatch.setattr(
-        main_module,
+        common_module,
         "m2m_translator",
         lambda _adapter, _source, targets: (
             lambda text, _partial: {target: f"[{target}] {text}" for target in targets}
