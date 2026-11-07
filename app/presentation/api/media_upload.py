@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from app.presentation.api import storage_fit
 log = logging.getLogger("ia.media_upload")
 
 ATTEMPTS = 2
+HEAD_START_WAIT_S = 120.0
+POLL_S = 2.0
 
 
 def store_in_background(
@@ -57,9 +60,13 @@ def store(
     thumbnail: Path | None,
     thumbnail_key: str,
     still_exists: Callable[[], bool],
+    ready: Callable[[str], bool] | None = None,
+    wait_s: float = HEAD_START_WAIT_S,
 ) -> bool:
     stored = False
     try:
+        if _needs_compression(source, duration_ms):
+            _wait_for_live(project_id, ready, wait_s)
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 _upload(source, duration_ms, media_key, content_type, project_id)
@@ -81,6 +88,29 @@ def store(
         source.unlink(missing_ok=True)
         if thumbnail is not None:
             thumbnail.unlink(missing_ok=True)
+
+
+def _needs_compression(source: Path, duration_ms: int) -> bool:
+    try:
+        return storage_fit.needs_fit(source.stat().st_size, duration_ms)
+    except (OSError, storage_fit.TooLongForStorage):
+        return False
+
+
+def _wait_for_live(project_id: str, ready: Callable[[str], bool] | None, wait_s: float) -> None:
+    """Comprimir compite por la CPU con la transcripción en vivo: se espera a que tenga margen."""
+    if ready is None:
+        from app.presentation.api import live
+
+        ready = live.head_start_ready
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        try:
+            if ready(project_id):
+                return
+        except Exception:  # noqa: BLE001 - ante la duda no se bloquea el guardado
+            return
+        time.sleep(POLL_S)
 
 
 def _upload(source: Path, duration_ms: int, key: str, content_type: str, project_id: str) -> None:

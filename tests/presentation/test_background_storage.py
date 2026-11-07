@@ -131,3 +131,56 @@ def test_reintenta_y_borra_si_el_proyecto_ya_no_existe(tmp_path: Path, monkeypat
     assert deleted == ["u/p1/v.mp4", "u/p1/thumbnail.jpg"]
     assert not source.exists() and not thumb.exists()
     assert media_store.staged("p1") is None
+
+
+def test_espera_al_modo_en_vivo_antes_de_comprimir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.presentation.api import storage_fit
+
+    source = tmp_path / "v.mp4"
+    source.write_bytes(b"video")
+    order: list[str] = []
+    answers = iter([False, False, True])
+
+    def ready(project_id: str) -> bool:
+        value = next(answers)
+        order.append(f"listo={value}")
+        return value
+
+    monkeypatch.setattr(media_upload, "POLL_S", 0.01)
+    monkeypatch.setattr(storage_fit, "needs_fit", lambda *_a, **_k: True)
+    monkeypatch.setattr(storage_fit, "fit", lambda src, *_a, **_k: order.append("comprimir") or src)
+    monkeypatch.setattr(media_store, "upload_file", lambda *a: order.append("subir"))
+    assert media_upload.store(
+        project_id="p2", source=source, duration_ms=1000, media_key="u/p2/v.mp4", content_type="video/mp4",
+        thumbnail=None, thumbnail_key="u/p2/thumbnail.jpg", still_exists=lambda: True, ready=ready,
+    )
+    assert order == ["listo=False", "listo=False", "listo=True", "comprimir", "subir"]
+
+
+def test_sin_compresion_no_espera(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "v.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(media_store, "upload_file", lambda *a: None)
+
+    def never(_project_id: str) -> bool:
+        raise AssertionError("no debía esperar")
+
+    assert media_upload.store(
+        project_id="p3", source=source, duration_ms=1000, media_key="u/p3/v.mp4", content_type="video/mp4",
+        thumbnail=None, thumbnail_key="u/p3/thumbnail.jpg", still_exists=lambda: True, ready=never,
+    )
+
+
+def test_margen_del_modo_en_vivo() -> None:
+    from app.presentation.api import live
+
+    sub = live.LiveSubtitler(
+        callbacks=None, source_language="en", duration_ms=300_000, targets=["es"],  # type: ignore[arg-type]
+    )
+    assert sub.buffered_ms() == 0
+    sub._ranges("en").add(0, 120_000)
+    sub._ranges("es").add(0, 60_000)
+    assert sub.buffered_ms() == 60_000
+    sub.failed.add("es")
+    assert sub.buffered_ms() == 120_000
+    assert live.head_start_ready("proyecto-sin-runner") is True

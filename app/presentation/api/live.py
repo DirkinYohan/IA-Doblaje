@@ -21,6 +21,7 @@ EDGE_MS = 400
 BACKOFF_MS = 1_500
 TRANSLATE_CHUNK_MS = 30_000
 MAX_FAILURES = 3
+HEAD_START_MS = 90_000
 
 
 def segment_id(language: str, start_ms: int, end_ms: int) -> str:
@@ -176,6 +177,14 @@ class LiveSubtitler:
             if self._first_untranslated(target, 0, self.duration_ms) is not None:
                 return False
         return True
+
+    def buffered_ms(self) -> int:
+        """Milisegundos listos desde el principio en todos los idiomas."""
+        languages = [code for code in self.languages() if code not in self.failed]
+        if not languages:
+            return 0
+        with self.data_lock:
+            return min(self._ranges(code).prefix_end() for code in languages)
 
     def progress(self) -> int:
         languages = self.languages()
@@ -500,6 +509,17 @@ _RUNNERS_LOCK = threading.Lock()
 def get_runner(project_id: str) -> LiveRunner | None:
     with _RUNNERS_LOCK:
         return _RUNNERS.get(project_id)
+
+
+def head_start_ready(project_id: str, *, buffer_ms: int = HEAD_START_MS) -> bool:
+    """True cuando el modo en vivo ya tiene margen y otro trabajo pesado no lo frenará."""
+    runner = get_runner(project_id)
+    if runner is None or runner.done.is_set():
+        return True
+    subtitler = runner.subtitler
+    if subtitler is None:
+        return False
+    return subtitler.buffered_ms() >= min(subtitler.duration_ms, buffer_ms)
 
 
 def ensure_runner(

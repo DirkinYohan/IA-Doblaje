@@ -195,14 +195,14 @@ def build(ctx: ApiContext) -> APIRouter:
                 _now(), duration_ms, thumb_value, _now(),
             ),
         )
-        if background is not None:
-            media_upload.store_in_background(**background)
         job_id = _create_job(conn, project_id, row["id"], "progressive", start=app.state.worker_enabled)
         uploaded = db.one(conn, "SELECT * FROM projects WHERE id=?", (project_id,))
         if uploaded is not None and app.state.worker_enabled:
             from app.presentation.api import live
 
             live.start_for_project(conn, uploaded, job_id=job_id)
+        if background is not None:
+            media_upload.store_in_background(**background)
         return {"id": project_id, "job_id": job_id, "title": filename, "duration_ms": duration_ms}
 
     @router.get("/api/videos/{project_id}")

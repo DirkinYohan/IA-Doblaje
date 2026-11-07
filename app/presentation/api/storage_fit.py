@@ -51,10 +51,12 @@ def _command(ffmpeg: str, source: Path, target: Path, kbps: int) -> list[str]:
     # Prioridad mínima: la transcripción en vivo comparte las mismas CPU.
     return [
         *([nice, "-n", "19"] if nice else []),
-        ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        # Un solo hilo: con uno por CPU visible le quitaba la CPU a la transcripción en vivo.
+        "-threads", "1", "-filter_threads", "1", "-i", str(source),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", f"scale=-2:'min({height},ih)'",
-        "-c:v", "libx264", "-preset", "superfast",
+        "-c:v", "libx264", "-preset", "superfast", "-threads", "1",
         "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k", "-ac", "2",
