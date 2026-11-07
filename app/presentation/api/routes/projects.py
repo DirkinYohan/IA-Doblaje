@@ -232,9 +232,10 @@ def build(ctx: ApiContext) -> APIRouter:
                 except Exception:  # noqa: BLE001
                     pass
 
-        db.run(conn, "DELETE FROM subtitles WHERE project_id=?", (project_id,))
-        db.run(conn, "DELETE FROM jobs WHERE project_id=?", (project_id,))
-        db.run(conn, "DELETE FROM projects WHERE id=?", (project_id,))
+        with db.transaction(conn) as tx:
+            tx.run("DELETE FROM subtitles WHERE project_id=?", (project_id,))
+            tx.run("DELETE FROM jobs WHERE project_id=?", (project_id,))
+            tx.run("DELETE FROM projects WHERE id=?", (project_id,))
         return {"ok": True}
 
     @router.put("/api/videos/{project_id}")

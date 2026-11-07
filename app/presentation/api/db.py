@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from app.core.config import PROJECT_ROOT
 
 Row = Any
 
@@ -209,27 +210,81 @@ class Connection:
         return f"<Connection backend={self.backend}>"
 
 
-def _open_postgres(url: str, timeout: float) -> Any:
-    import psycopg
-    from psycopg.rows import dict_row
+class _Rows:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
 
-    raw = psycopg.connect(
-        url,
-        row_factory=dict_row,
-        connect_timeout=int(timeout),
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=5,
-    )
+    def fetchone(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self) -> list[Any]:
+        return list(self._rows)
+
+
+class PooledConnection:
+    backend = "postgres"
+
+    def __init__(self, pool: Any) -> None:
+        self.pool = pool
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _Rows:
+        with self.pool.connection() as raw:
+            cursor = raw.execute(_translate(sql), params)
+            return _Rows(cursor.fetchall() if cursor.description else [])
+
+    def executescript(self, script: str) -> _Rows:
+        with self.pool.connection() as raw:
+            for statement in (s for s in script.split(";") if s.strip()):
+                raw.execute(statement)
+        return _Rows([])
+
+    def commit(self) -> None:
+        pass
+
+    def rollback(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.pool.close()
+
+    def __repr__(self) -> str:
+        return f"<PooledConnection max_size={self.pool.max_size}>"
+
+
+def _configure_session(raw: Any) -> None:
     with raw.cursor() as cursor:
         cursor.execute("SET statement_timeout = '60s'")
         cursor.execute("SET lock_timeout = '15s'")
     raw.commit()
-    return raw
 
 
-def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
+def _open_pool(url: str, timeout: float) -> PooledConnection:
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    size = max(1, int(os.environ.get("IA_DB_POOL_SIZE", "5")))
+    pool = ConnectionPool(
+        url,
+        min_size=1,
+        max_size=size,
+        timeout=timeout,
+        kwargs={
+            "row_factory": dict_row,
+            "connect_timeout": int(timeout),
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
+        configure=_configure_session,
+        check=ConnectionPool.check_connection,
+        open=False,
+    )
+    pool.open(wait=True, timeout=timeout)
+    return PooledConnection(pool)
+
+
+def connect(target: Path | str, *, timeout: float = 15.0) -> Connection | PooledConnection:
     url = database_url()
     if backend_name() == "postgres" and url.startswith(POSTGRES_SCHEMES):
         try:
@@ -240,14 +295,13 @@ def connect(target: Path | str, *, timeout: float = 15.0) -> Connection:
                 'Instálalo con: pip install "psycopg[binary]"'
             ) from exc
         try:
-            raw = _open_postgres(url, timeout)
+            return _open_pool(url, timeout)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 f"No se pudo conectar a PostgreSQL ({type(exc).__name__}: {exc}). "
                 "Revisa la URL: los caracteres especiales de la contraseña deben ir "
                 "percent-encoded (@ → %40, # → %23, / → %2F)."
             ) from exc
-        return Connection(raw, "postgres", reconnect=lambda: _open_postgres(url, timeout))
 
     path = Path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,17 +340,53 @@ def _add_missing_columns(
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
-def one(conn: Connection, sql: str, params: tuple[Any, ...] = ()) -> Row | None:
+def one(conn: Connection | PooledConnection, sql: str, params: tuple[Any, ...] = ()) -> Row | None:
+    if isinstance(conn, PooledConnection):
+        return conn.execute(sql, params).fetchone()
     with _LOCK:
         return conn.execute(sql, params).fetchone()
 
 
-def many(conn: Connection, sql: str, params: tuple[Any, ...] = ()) -> list[Row]:
+def many(conn: Connection | PooledConnection, sql: str, params: tuple[Any, ...] = ()) -> list[Row]:
+    if isinstance(conn, PooledConnection):
+        return conn.execute(sql, params).fetchall()
     with _LOCK:
         return list(conn.execute(sql, params).fetchall())
 
 
-def run(conn: Connection, sql: str, params: tuple[Any, ...] = ()) -> None:
+def run(conn: Connection | PooledConnection, sql: str, params: tuple[Any, ...] = ()) -> None:
+    if isinstance(conn, PooledConnection):
+        conn.execute(sql, params)
+        return
     with _LOCK:
         conn.execute(sql, params)
+        conn.commit()
+
+
+class Transaction:
+    def __init__(self, execute: Any) -> None:
+        self._execute = execute
+
+    def run(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+        self._execute(sql, params)
+
+    def one(self, sql: str, params: tuple[Any, ...] = ()) -> Row | None:
+        return self._execute(sql, params).fetchone()
+
+    def many(self, sql: str, params: tuple[Any, ...] = ()) -> list[Row]:
+        return list(self._execute(sql, params).fetchall())
+
+
+@contextmanager
+def transaction(conn: Connection | PooledConnection) -> Iterator[Transaction]:
+    if isinstance(conn, PooledConnection):
+        with conn.pool.connection() as raw, raw.transaction():
+            yield Transaction(lambda sql, params: raw.execute(_translate(sql), params))
+        return
+    with _LOCK:
+        try:
+            yield Transaction(conn.execute)
+        except BaseException:
+            conn.rollback()
+            raise
         conn.commit()

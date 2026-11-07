@@ -130,12 +130,12 @@ def build(ctx: ApiContext) -> APIRouter:
             taken = db.one(conn, "SELECT id FROM users WHERE email=? AND id<>?", (email, user["id"]))
             if taken is not None:
                 raise HTTPException(status_code=409, detail="El email ya está registrado")
-        db.run(
-            conn,
-            "UPDATE users SET email=?, email_verified_at=? WHERE id=?",
-            (email, user["email_verified_at"] or _now(), user["id"]),
-        )
-        db.run(conn, "UPDATE email_tokens SET used=1 WHERE user_id=?", (user["id"],))
+        with db.transaction(conn) as tx:
+            tx.run(
+                "UPDATE users SET email=?, email_verified_at=? WHERE id=?",
+                (email, user["email_verified_at"] or _now(), user["id"]),
+            )
+            tx.run("UPDATE email_tokens SET used=1 WHERE user_id=?", (user["id"],))
         return {"ok": True, "email": email}
 
     @router.post("/api/auth/resend-verification")
@@ -161,12 +161,12 @@ def build(ctx: ApiContext) -> APIRouter:
         )
         if row is None:
             raise HTTPException(status_code=400, detail="Token inválido o vencido")
-        db.run(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["user_id"]))
-        db.run(
-            conn, "UPDATE users SET email_verified_at=? WHERE id=? AND email_verified_at=''", (_now(), row["user_id"])
-        )
-        db.run(conn, "UPDATE reset_tokens SET used=1 WHERE token_hash=?", (token_hash(token),))
-        db.run(conn, "DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
+        new_hash = hash_password(password)
+        with db.transaction(conn) as tx:
+            tx.run("UPDATE users SET password_hash=? WHERE id=?", (new_hash, row["user_id"]))
+            tx.run("UPDATE users SET email_verified_at=? WHERE id=? AND email_verified_at=''", (_now(), row["user_id"]))
+            tx.run("UPDATE reset_tokens SET used=1 WHERE token_hash=?", (token_hash(token),))
+            tx.run("DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
         return {"ok": True}
 
     @router.post("/api/ws-ticket")
