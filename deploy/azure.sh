@@ -14,10 +14,13 @@ IMAGE="ghcr.io/dirkinyohan/ia-doblaje-api:${1:-latest}"
 
 value() {
   local line
-  line=$(grep -E "^$1=" .env | tail -n 1 || true)
+  line=$(grep -E "^$1=" .env | tail -n 1 | tr -d '\r' || true)
   line="${line#*=}"
-  line="${line%\"}"
-  echo "${line#\"}"
+  case "$line" in
+    \"*\") line="${line:1:${#line}-2}" ;;
+    \'*\') line="${line:1:${#line}-2}" ;;
+  esac
+  echo "$line"
 }
 
 DATABASE_URL="$(value IA_DATABASE_URL)"
@@ -35,6 +38,13 @@ for name in DATABASE_URL SUPABASE_URL SUPABASE_KEY BREVO_KEY MAIL_FROM; do
     exit 1
   fi
 done
+
+# Sin una URL postgres válida el backend usaría SQLite dentro del contenedor,
+# que se borra en cada reinicio: mejor no desplegar.
+case "$DATABASE_URL" in
+  postgres://*|postgresql://*) ;;
+  *) echo "IA_DATABASE_URL no es una URL de PostgreSQL" >&2; exit 1 ;;
+esac
 
 az provider register --namespace Microsoft.App --wait >/dev/null
 az group create --name "$RG" --location "$LOCATION" --output none
@@ -70,6 +80,9 @@ if az containerapp show --name "$APP" --resource-group "$RG" --output none 2>/de
   az containerapp update --name "$APP" --resource-group "$RG" --image "$IMAGE" \
     --cpu 2 --memory 4Gi --min-replicas 0 --max-replicas 1 \
     --set-env-vars "${ENV_VARS[@]}" --output none
+  # Los secretos nuevos solo se aplican al reiniciar la revisión.
+  REVISION=$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.latestRevisionName -o tsv)
+  az containerapp revision restart --name "$APP" --resource-group "$RG" --revision "$REVISION" --output none
 else
   az containerapp create --name "$APP" --resource-group "$RG" --environment "$ENVIRONMENT" \
     --image "$IMAGE" --cpu 2 --memory 4Gi --min-replicas 0 --max-replicas 1 \
