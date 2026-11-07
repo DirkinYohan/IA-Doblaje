@@ -28,7 +28,10 @@ from app.presentation.api.schemas import ResetPasswordBody
 from app.presentation.api.schemas import TokenBody
 from app.presentation.api.schemas import UpdateMeBody
 from app.presentation.api.schemas import is_valid_email
+from app.presentation.api.security import burn_password_check
+from app.presentation.api.security import cookie_secure
 from app.presentation.api.security import hash_password
+from app.presentation.api.security import needs_rehash
 from app.presentation.api.security import new_token
 from app.presentation.api.security import token_hash
 from app.presentation.api.security import verify_password
@@ -78,8 +81,13 @@ def build(ctx: ApiContext) -> APIRouter:
         password = body.password
         remember = body.remember
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
-        if row is None or not verify_password(password, row["password_hash"]):
+        if row is None:
+            burn_password_check(password)
             raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+        if not verify_password(password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+        if needs_rehash(row["password_hash"]):
+            db.run(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
         if not row["email_verified_at"]:
             raise HTTPException(status_code=403, detail="Confirma tu correo para iniciar sesión")
         set_session(response, row["id"], remember)
@@ -89,7 +97,7 @@ def build(ctx: ApiContext) -> APIRouter:
     def logout(response: Response, ia_session: str | None = Cookie(default=None)) -> dict[str, bool]:
         if ia_session:
             db.run(conn, "DELETE FROM sessions WHERE token_hash=?", (token_hash(ia_session),))
-        response.delete_cookie(COOKIE, path="/")
+        response.delete_cookie(COOKIE, path="/", secure=cookie_secure(), httponly=True, samesite="lax")
         return {"ok": True}
 
     @router.post("/api/auth/forgot-password")

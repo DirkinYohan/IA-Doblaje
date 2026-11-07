@@ -22,6 +22,7 @@ from app.presentation.api.common import COOKIE
 from app.presentation.api.common import WS_TICKET_TTL_S
 from app.presentation.api.common import _now
 from app.presentation.api.common import sqlite3_row
+from app.presentation.api.security import cookie_secure
 from app.presentation.api.security import new_token
 from app.presentation.api.security import token_hash
 
@@ -115,6 +116,7 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
             COOKIE,
             token,
             httponly=True,
+            secure=cookie_secure(),
             samesite="lax",
             max_age=hours * 3600,
             path="/",

@@ -26,6 +26,7 @@ def client(tmp_path: Path, mail_dir: Path, monkeypatch: pytest.MonkeyPatch) -> I
     monkeypatch.setenv("IA_MAIL_DIR", str(mail_dir))
     monkeypatch.setenv("IA_DISABLE_WORKER", "1")
     monkeypatch.setenv("APP_PUBLIC_URL", PUBLIC + "/")
+    monkeypatch.setenv("IA_COOKIE_SECURE", "0")
     monkeypatch.setenv("BREVO_API_KEY", "")
     from app.core.config import clear_settings_cache
     from app.presentation.api.main import create_app
