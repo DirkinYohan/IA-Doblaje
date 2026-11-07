@@ -12,6 +12,10 @@ def build(ctx: ApiContext) -> APIRouter:
     user_from_cookie = ctx.user_from_cookie
     router = APIRouter()
 
+    @router.get("/api/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     @router.get("/api/system/preflight")
     def system_preflight(ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
         user_from_cookie(ia_session)

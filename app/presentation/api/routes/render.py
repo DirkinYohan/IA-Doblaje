@@ -61,12 +61,14 @@ def build(ctx: ApiContext) -> APIRouter:
         return render.status(conn, paths["output"], project_id, lang, stamp)
 
     @router.get("/api/videos/{project_id}/render/file")
-    def render_file(project_id: str, lang: str, ia_session: str | None = Cookie(default=None)) -> Response:
+    def render_file(
+        project_id: str, lang: str, ticket: str | None = None, ia_session: str | None = Cookie(default=None)
+    ) -> Response:
         from urllib.parse import quote
 
         from app.presentation.api import render
 
-        row = user_from_cookie(ia_session)
+        row = ctx.user_from_ticket_or_cookie(ticket, ia_session)
         project, _cues, _stamp = _render_track(project_id, row["id"], lang)
         video = render.ready_file(paths["output"], project_id, lang)
         if video is None:

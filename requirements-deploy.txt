@@ -1,0 +1,31 @@
+# Dependencias del servidor en producción (Azure Container Apps).
+# Sin torch: la API sólo usa Whisper y M2M100 sobre CTranslate2.
+# faster-whisper se instala aparte (ver Dockerfile): pide av<13, que no existe
+# para Python 3.14, y funciona con av 19 como en desarrollo.
+fastapi==0.142.2
+starlette==1.7.0
+uvicorn==0.54.0
+websockets==15.0.1
+python-multipart==0.0.32
+pydantic==2.13.5
+pydantic-settings==2.15.0
+numpy==2.5.3
+httpx==0.28.1
+psycopg[binary,pool]==3.3.6
+psycopg-pool==3.3.3
+python-dotenv==1.2.4
+PyYAML==6.0.3
+structlog==26.1.0
+rich==15.0.0
+typer==0.27.2
+psutil==7.2.2
+soundfile==0.14.0
+python-magic==0.4.27
+ctranslate2==4.8.2
+av==19.0.1
+onnxruntime==1.30.0
+transformers==5.18.0
+tokenizers==0.23.2
+sentencepiece==0.2.2
+huggingface-hub==1.33.0
+requests==2.34.2

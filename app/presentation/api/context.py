@@ -37,6 +37,7 @@ class ApiContext:
     user_from_cookie: Callable[..., Any]
     issue_ws_ticket: Callable[..., Any]
     user_from_socket: Callable[..., Any]
+    user_from_ticket_or_cookie: Callable[..., Any]
     set_session: Callable[..., Any]
     public_user: Callable[..., Any]
     send_verification: Callable[..., Any]
@@ -80,8 +81,7 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
         cluster.issue_ticket(conn, token_hash(ticket), user_id, WS_TICKET_TTL_S)
         return ticket
 
-    def user_from_socket(socket: WebSocket) -> sqlite3_row:
-        ticket = socket.query_params.get("ticket") or ""
+    def user_from_ticket_or_cookie(ticket: str | None, token: str | None) -> sqlite3_row:
         if ticket:
             user_id = cluster.consume_ticket(conn, token_hash(ticket))
             if user_id is None:
@@ -90,7 +90,10 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
             if row is None:
                 raise HTTPException(status_code=401, detail="Sesión inválida")
             return row
-        return user_from_cookie(socket.cookies.get(COOKIE))
+        return user_from_cookie(token)
+
+    def user_from_socket(socket: WebSocket) -> sqlite3_row:
+        return user_from_ticket_or_cookie(socket.query_params.get("ticket") or "", socket.cookies.get(COOKIE))
 
     def set_session(response: Response, user_id: str, remember: bool) -> None:
         token = new_token()
@@ -141,6 +144,7 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
         user_from_cookie=user_from_cookie,
         issue_ws_ticket=issue_ws_ticket,
         user_from_socket=user_from_socket,
+        user_from_ticket_or_cookie=user_from_ticket_or_cookie,
         set_session=set_session,
         public_user=public_user,
         send_verification=send_verification,

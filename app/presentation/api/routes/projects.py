@@ -84,9 +84,10 @@ def build(ctx: ApiContext) -> APIRouter:
         file: UploadFile = File(...),
         source_language: str = Form("und"),
         target_languages: str = Form("es"),
+        ticket: str | None = None,
         ia_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
-        row = user_from_cookie(ia_session)
+        row = ctx.user_from_ticket_or_cookie(ticket, ia_session)
         source = source_language.strip().lower()
         targets = [p.strip().lower() for p in target_languages.split(",") if p.strip()]
         if source not in OFFICIAL | {"und"} or not targets or any(t not in OFFICIAL for t in targets):
