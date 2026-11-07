@@ -13,13 +13,30 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from app.application.use_cases.build_subtitles import cue_from_dict, cue_to_dict, zip_exports
 from app.core.config import PROJECT_ROOT, get_settings
 from app.infrastructure.subtitles.exporters import to_ass, to_srt, to_vtt
 from app.presentation.api import db, mailer, media_store, worker
+from app.presentation.api.schemas import (
+    ChangeEmailBody,
+    ChangePasswordBody,
+    CreateJobBody,
+    EmailBody,
+    LoginBody,
+    ProduceBody,
+    RegisterBody,
+    RenameBody,
+    RenderBody,
+    ResetPasswordBody,
+    SubtitlesBody,
+    TokenBody,
+    UpdateMeBody,
+    is_valid_email,
+)
 from app.presentation.api.realtime import RealtimeSession, m2m_translator, whisper_transcriber
 from app.presentation.api.security import RateLimiter, hash_password, new_token, token_hash, verify_password
 
@@ -278,6 +295,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.state.conn = conn
+
+    @app.exception_handler(RequestValidationError)
+    async def _invalid_request(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": "Datos inválidos"})
+
     app.state.paths = paths
     app.state.login_limit = RateLimiter(10, 60)
     app.state.register_limit = RateLimiter(5, 60)
@@ -403,17 +425,15 @@ def create_app() -> FastAPI:
         mailer.send_in_background(app.state.mailer, mail)
 
     @app.post("/api/auth/register")
-    async def register(request: Request) -> dict[str, Any]:
+    def register(request: Request, body: RegisterBody) -> dict[str, Any]:
         if not app.state.register_limit.allow(client_key(request)):
             raise HTTPException(status_code=429, detail="Demasiados registros")
-        body = await request.json()
-        name = str(body.get("name") or "").strip()
-        email = str(body.get("email") or "").strip().lower()
-        password = str(body.get("password") or "")
-        confirm = str(body.get("confirm") or "")
-        if len(name) < 2 or "@" not in email or len(password) < 8 or password != confirm:
+        name = body.name.strip()
+        email = body.email.strip().lower()
+        password = body.password
+        if not 2 <= len(name) <= MAX_NAME or not is_valid_email(email) or len(password) < 8 or password != body.confirm:
             raise HTTPException(status_code=422, detail="Datos de registro inválidos")
-        locale = mailer.locale_of(body.get("locale"))
+        locale = mailer.locale_of(body.locale)
         existing = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
         if existing is not None and existing["email_verified_at"]:
             raise HTTPException(status_code=409, detail="El email ya está registrado")
@@ -430,13 +450,12 @@ def create_app() -> FastAPI:
         return {"status": "verify", "email": email}
 
     @app.post("/api/auth/login")
-    async def login(request: Request, response: Response) -> dict[str, Any]:
+    def login(request: Request, response: Response, body: LoginBody) -> dict[str, Any]:
         if not app.state.login_limit.allow(client_key(request)):
             raise HTTPException(status_code=429, detail="Demasiados intentos")
-        body = await request.json()
-        email = str(body.get("email") or "").strip().lower()
-        password = str(body.get("password") or "")
-        remember = bool(body.get("remember"))
+        email = body.email.strip().lower()
+        password = body.password
+        remember = body.remember
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
         if row is None or not verify_password(password, row["password_hash"]):
             raise HTTPException(status_code=401, detail="Credenciales incorrectas")
@@ -453,11 +472,10 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/auth/forgot-password")
-    async def forgot(request: Request) -> dict[str, str]:
+    def forgot(request: Request, body: EmailBody) -> dict[str, str]:
         if not app.state.forgot_limit.allow(client_key(request)):
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes")
-        body = await request.json()
-        email = str(body.get("email") or "").strip().lower()
+        email = body.email.strip().lower()
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,))
         if row is not None:
             token = new_token()
@@ -469,16 +487,15 @@ def create_app() -> FastAPI:
             )
             mail = mailer.compose(
                 "reset", to=email, name=row["name"], token=token, expires=expires.isoformat(),
-                locale=mailer.locale_of(body.get("locale")),
+                locale=mailer.locale_of(body.locale),
                 link=f"{mailer.public_url()}/reset-password?token={token}",
             )
             mailer.send_in_background(app.state.mailer, mail)
         return {"status": "sent"}
 
     @app.post("/api/auth/verify-email")
-    async def verify_email(request: Request) -> dict[str, Any]:
-        body = await request.json()
-        token = str(body.get("token") or "")
+    def verify_email(body: TokenBody) -> dict[str, Any]:
+        token = body.token
         row = db.one(
             conn,
             "SELECT * FROM email_tokens WHERE token_hash=? AND used=0 AND expires_at > ?",
@@ -501,23 +518,20 @@ def create_app() -> FastAPI:
         return {"ok": True, "email": email}
 
     @app.post("/api/auth/resend-verification")
-    async def resend_verification(request: Request) -> dict[str, str]:
-        body = await request.json()
-        email = str(body.get("email") or "").strip().lower()
+    def resend_verification(request: Request, body: EmailBody) -> dict[str, str]:
+        email = body.email.strip().lower()
         if not app.state.verify_limit.allow(client_key(request)) or not app.state.verify_limit.allow(f"mail:{email}"):
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes")
         row = db.one(conn, "SELECT * FROM users WHERE email=?", (email,)) if email else None
         if row is not None and not row["email_verified_at"]:
-            send_verification(row["id"], row["name"], row["email"], mailer.locale_of(body.get("locale")))
+            send_verification(row["id"], row["name"], row["email"], mailer.locale_of(body.locale))
         return {"status": "sent"}
 
     @app.post("/api/auth/reset-password")
-    async def reset_password(request: Request) -> dict[str, bool]:
-        body = await request.json()
-        token = str(body.get("token") or "")
-        password = str(body.get("password") or "")
-        confirm = str(body.get("confirm") or "")
-        if len(password) < 8 or password != confirm or not token:
+    def reset_password(body: ResetPasswordBody) -> dict[str, bool]:
+        token = body.token
+        password = body.password
+        if len(password) < 8 or password != body.confirm or not token:
             raise HTTPException(status_code=422, detail="Contraseña inválida")
         row = db.one(
             conn,
@@ -545,12 +559,11 @@ def create_app() -> FastAPI:
         return public_user(row)
 
     @app.post("/api/auth/change-email")
-    async def change_email(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
+    def change_email(body: ChangeEmailBody, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
         row = user_from_cookie(ia_session)
-        body = await request.json()
-        email = str(body.get("email") or "").strip().lower()
-        password = str(body.get("password") or "")
-        if "@" not in email or "." not in email.split("@")[-1]:
+        email = body.email.strip().lower()
+        password = body.password
+        if not is_valid_email(email):
             raise HTTPException(status_code=422, detail="Correo inválido")
         if not verify_password(password, row["password_hash"]):
             raise HTTPException(status_code=401, detail="Contraseña incorrecta")
@@ -559,30 +572,26 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="El email ya está registrado")
         if email == row["email"]:
             return {"email": email, "pending_email": ""}
-        send_verification(row["id"], row["name"], email, mailer.locale_of(body.get("locale")))
+        send_verification(row["id"], row["name"], email, mailer.locale_of(body.locale))
         return {"email": row["email"], "pending_email": email}
 
     @app.post("/api/auth/change-password")
-    async def change_password(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, bool]:
+    def change_password(body: ChangePasswordBody, ia_session: str | None = Cookie(default=None)) -> dict[str, bool]:
         row = user_from_cookie(ia_session)
-        body = await request.json()
-        current = str(body.get("current") or "")
-        password = str(body.get("password") or "")
-        confirm = str(body.get("confirm") or "")
-        if not verify_password(current, row["password_hash"]):
+        password = body.password
+        if not verify_password(body.current, row["password_hash"]):
             raise HTTPException(status_code=401, detail="Contraseña incorrecta")
-        if len(password) < 8 or password != confirm:
+        if len(password) < 8 or password != body.confirm:
             raise HTTPException(status_code=422, detail="Contraseña inválida")
         db.run(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
         return {"ok": True}
 
     @app.patch("/api/users/me")
-    async def update_me(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+    def update_me(body: UpdateMeBody, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
         row = user_from_cookie(ia_session)
-        body = await request.json()
-        if "name" not in body:
+        if body.name is None:
             raise HTTPException(status_code=422, detail="Nada que actualizar")
-        name = str(body.get("name") or "").strip()
+        name = body.name.strip()
         if len(name) < 2 or len(name) > MAX_NAME:
             raise HTTPException(status_code=422, detail=f"El nombre debe tener entre 2 y {MAX_NAME} caracteres")
         db.run(conn, "UPDATE users SET name=? WHERE id=?", (name, row["id"]))
@@ -612,7 +621,7 @@ def create_app() -> FastAPI:
         return {"videos": [_project(p) for p in projects], "jobs": [_job(j) for j in jobs]}
 
     @app.post("/api/videos")
-    async def upload_video(
+    def upload_video(
         request: Request,
         file: UploadFile = File(...),
         source_language: str = Form("und"),
@@ -651,7 +660,7 @@ def create_app() -> FastAPI:
             target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("wb") as sink:
                 while True:
-                    chunk = await file.read(UPLOAD_CHUNK)
+                    chunk = file.file.read(UPLOAD_CHUNK)
                     if not chunk:
                         break
                     written += len(chunk)
@@ -668,7 +677,7 @@ def create_app() -> FastAPI:
             target.unlink(missing_ok=True)
             _raise_engine_error("No se pudo guardar el archivo", exc)
         finally:
-            await file.close()
+            file.file.close()
 
         if written == 0:
             target.unlink(missing_ok=True)
@@ -794,11 +803,10 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.put("/api/videos/{project_id}")
-    async def rename_video(project_id: str, request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
+    def rename_video(project_id: str, body: RenameBody, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
         row = user_from_cookie(ia_session)
         _own_project(conn, project_id, row["id"])
-        body = await request.json()
-        title = str(body.get("title") or "").strip()
+        title = body.title.strip()
         if not title or len(title) > 180:
             raise HTTPException(status_code=422, detail="Título inválido")
         db.run(conn, "UPDATE projects SET title=? WHERE id=?", (title, project_id))
@@ -960,28 +968,22 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/jobs")
-    async def create_job(request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
+    def create_job(body: CreateJobBody, ia_session: str | None = Cookie(default=None)) -> dict[str, str]:
         row = user_from_cookie(ia_session)
-        body = await request.json()
-        project = _own_project(conn, str(body.get("project_id") or ""), row["id"])
-        mode = str(body.get("mode") or "progressive")
+        project = _own_project(conn, body.project_id, row["id"])
+        mode = body.mode or "progressive"
         return {"id": _create_job(conn, project["id"], row["id"], mode)}
 
     @app.post("/api/videos/{project_id}/produce")
-    async def produce_video(
+    def produce_video(
         project_id: str,
-        request: Request,
+        body: ProduceBody | None = None,
         ia_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
         row = user_from_cookie(ia_session)
         project = _own_project(conn, project_id, row["id"])
 
-        body: dict[str, Any] = {}
-        try:
-            body = await request.json()
-        except Exception:  # noqa: BLE001 - cuerpo opcional
-            body = {}
-        mode = str(body.get("mode") or "progressive")
+        mode = (body.mode if body else "") or "progressive"
         if mode not in {"progressive", "full"}:
             mode = "progressive"
 
@@ -1112,14 +1114,16 @@ def create_app() -> FastAPI:
         }
 
     @app.put("/api/subtitles/{project_id}")
-    async def put_subtitles(project_id: str, request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, int]:
+    def put_subtitles(project_id: str, body: SubtitlesBody, ia_session: str | None = Cookie(default=None)) -> dict[str, int]:
         row = user_from_cookie(ia_session)
         _own_project(conn, project_id, row["id"])
-        body = await request.json()
-        language = str(body.get("language") or "")
+        language = body.language
         if language not in OFFICIAL and language != "und":
             raise HTTPException(status_code=422, detail="Idioma inválido")
-        cues = [cue_to_dict(cue_from_dict(item)) for item in body.get("cues") or []]
+        try:
+            cues = [cue_to_dict(cue_from_dict(item)) for item in body.cues]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Subtítulos inválidos") from exc
         db.run(
             conn,
             """
@@ -1187,15 +1191,13 @@ def create_app() -> FastAPI:
         return project, cues, str(row["updated_at"] or "")
 
     @app.post("/api/videos/{project_id}/render")
-    async def start_render(project_id: str, request: Request, ia_session: str | None = Cookie(default=None)) -> dict[str, Any]:
+    def start_render(
+        project_id: str, body: RenderBody | None = None, ia_session: str | None = Cookie(default=None)
+    ) -> dict[str, Any]:
         from app.presentation.api import live, render
 
         row = user_from_cookie(ia_session)
-        try:
-            body = await request.json()
-        except Exception:  # noqa: BLE001 - cuerpo opcional
-            body = {}
-        lang = str(body.get("lang") or "").strip().lower()
+        lang = (body.lang if body else "").strip().lower()
         if not lang:
             raise HTTPException(status_code=422, detail="Falta el idioma")
         project, cues, stamp = _render_track(project_id, row["id"], lang)
