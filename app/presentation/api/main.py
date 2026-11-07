@@ -24,7 +24,7 @@ from app.presentation.api.routes import projects
 from app.presentation.api.routes import render
 from app.presentation.api.routes import subtitles
 from app.presentation.api.routes import system
-from app.presentation.api.security import RateLimiter
+from app.presentation.api.cluster import DbRateLimiter
 
 
 def create_app() -> FastAPI:
@@ -61,10 +61,10 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=422, content={"detail": "Datos inválidos"})
 
     app.state.paths = paths
-    app.state.login_limit = RateLimiter(10, 60)
-    app.state.register_limit = RateLimiter(5, 60)
-    app.state.forgot_limit = RateLimiter(5, 300)
-    app.state.verify_limit = RateLimiter(5, 600)
+    app.state.login_limit = DbRateLimiter(conn, "login", 10, 60)
+    app.state.register_limit = DbRateLimiter(conn, "register", 5, 60)
+    app.state.forgot_limit = DbRateLimiter(conn, "forgot", 5, 300)
+    app.state.verify_limit = DbRateLimiter(conn, "verify", 5, 600)
     app.state.mailer = mailer.from_env(paths["mail"])
     try:
         media_store.purge_temp(Path(str(settings.paths.data_temp_dir)), attempts=5, interval=0.2)

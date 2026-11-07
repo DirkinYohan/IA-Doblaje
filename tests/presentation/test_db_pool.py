@@ -117,3 +117,29 @@ def test_postgres_se_recupera_si_el_servidor_corta_las_conexiones(pg_client) -> 
     )
     assert db.one(conn, "SELECT 1 AS ok")["ok"] == 1
     assert client.get("/api/auth/me").status_code == 401
+
+
+@pg
+def test_postgres_coordinacion_entre_procesos(pg_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.presentation.api import cluster, render, worker
+
+    client, _admin, _schema = pg_client
+    conn = client.app.state.conn
+    cluster.issue_ticket(conn, "h1", "u1", 60)
+    assert cluster.consume_ticket(conn, "h1") == "u1"
+    assert cluster.consume_ticket(conn, "h1") is None
+    limiter = cluster.DbRateLimiter(conn, "prueba", 2, 60)
+    assert [limiter.allow("ip") for _ in range(3)] == [True, True, False]
+    db.run(
+        conn,
+        "INSERT INTO jobs (id, project_id, user_id, status, progress, stage, error, created_at, updated_at) "
+        "VALUES ('j1', 'p', 'u', 'QUEUED', 0, 'QUEUED', '', 't', 't')",
+    )
+    assert worker.claim(conn, "j1") is True
+    assert cluster.acquire_lease(conn, "p1") is True
+    assert cluster.renew_lease(conn, "p1") is not None
+    assert render._claim(conn, "p1", "es", "v1") is not None
+    monkeypatch.setattr(cluster, "INSTANCE_ID", "otro-proceso")
+    assert worker.claim(conn, "j1") is False
+    assert cluster.acquire_lease(conn, "p1") is False
+    assert render._claim(conn, "p1", "es", "v1") is None

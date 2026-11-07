@@ -65,7 +65,7 @@ class Fakes:
     def emit(self, event: dict[str, Any]) -> None:
         self.events.append(event)
 
-    def persist(self, language: str, cues: list[dict[str, Any]], covered: int) -> None:
+    def persist(self, language: str, cues: list[dict[str, Any]], covered: int, _ranges: Any = None) -> None:
         self.persisted[language] = ([dict(c) for c in cues], covered)
 
     def callbacks(self) -> LiveCallbacks:

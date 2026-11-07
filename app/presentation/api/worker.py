@@ -9,7 +9,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.exceptions import PipelineCancelled
-from app.presentation.api import db, media_store
+from app.presentation.api import cluster, db, media_store
 from app.presentation.api.progress import ProgressTracker, canonical_key
 
 
@@ -29,6 +29,7 @@ TRANSLATION_BATCH_CHARS = 4000
 
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
 ORPHAN_STATES = {"PENDING", "QUEUED", "PROCESSING", "TRANSCRIBING", "TRANSLATING", "GENERATING_SUBTITLES"}
+POLL_S = 2.0
 
 
 def _utcnow() -> str:
@@ -110,7 +111,7 @@ def enqueue(conn: Any, job_id: str) -> None:
     db.run(
         conn,
         "UPDATE jobs SET status='QUEUED', progress=0, stage='QUEUED', error='', "
-        "stage_history=?, updated_at=? WHERE id=?",
+        "stage_history=?, updated_at=?, claimed_by='', heartbeat_at=0 WHERE id=?",
         (json.dumps(queued_entry, ensure_ascii=False), _utcnow(), job_id),
     )
     if _QUEUE is None:
@@ -137,10 +138,10 @@ def cancel(conn: Any, job_id: str) -> None:
 def reconcile_orphans(conn: Any) -> dict[str, int]:
     rows = db.many(
         conn,
-        "SELECT id, status FROM jobs WHERE status IN ({})".format(
+        "SELECT id, status FROM jobs WHERE status IN ({}) AND (claimed_by='' OR heartbeat_at < ?)".format(
             ",".join("?" for _ in ORPHAN_STATES)
         ),
-        tuple(sorted(ORPHAN_STATES)),
+        (*sorted(ORPHAN_STATES), cluster.stale_before()),
     )
     requeued = 0
     for row in rows:
@@ -158,24 +159,104 @@ def reconcile_orphans(conn: Any) -> dict[str, int]:
     return {"requeued": requeued}
 
 
+def requeue_stale(conn: Any) -> int:
+    running = sorted(ORPHAN_STATES)
+    rows = db.many(
+        conn,
+        "SELECT id FROM jobs WHERE claimed_by<>'' AND heartbeat_at < ? AND status IN ({})".format(
+            ",".join("?" for _ in running)
+        ),
+        (cluster.stale_before(), *running),
+    )
+    for row in rows:
+        db.run(
+            conn,
+            "UPDATE jobs SET status='QUEUED', stage='QUEUED', claimed_by='', heartbeat_at=0, "
+            "error='reencolado: el proceso que lo atendía dejó de responder', updated_at=? "
+            "WHERE id=? AND heartbeat_at < ?",
+            (_utcnow(), row["id"], cluster.stale_before()),
+        )
+    return len(rows)
+
+
+def claim(conn: Any, job_id: str) -> bool:
+    with db.transaction(conn) as tx:
+        row = tx.one(
+            "UPDATE jobs SET claimed_by=?, heartbeat_at=? "
+            "WHERE id=? AND status='QUEUED' AND claimed_by='' RETURNING id",
+            (cluster.INSTANCE_ID, cluster.now(), job_id),
+        )
+    return row is not None
+
+
+def _next_queued(conn: Any) -> str | None:
+    row = db.one(
+        conn,
+        "SELECT id FROM jobs WHERE status='QUEUED' AND claimed_by='' ORDER BY created_at LIMIT 1",
+    )
+    return str(row["id"]) if row is not None else None
+
+
+def _heartbeat(conn: Any, job_id: str, stop: threading.Event, cancel_event: threading.Event) -> None:
+    while not stop.wait(cluster.HEARTBEAT_S):
+        try:
+            with db.transaction(conn) as tx:
+                row = tx.one(
+                    "UPDATE jobs SET heartbeat_at=? WHERE id=? AND claimed_by=? RETURNING status",
+                    (cluster.now(), job_id, cluster.INSTANCE_ID),
+                )
+        except Exception:  # noqa: BLE001 - un fallo puntual de la base no corta el trabajo
+            continue
+        if row is None or row["status"] == "CANCELLED":
+            cancel_event.set()
+
+
+def _run_claimed(conn: Any, job_id: str) -> None:
+    cancel_event = _CANCEL.setdefault(job_id, threading.Event())
+    stop = threading.Event()
+    beat = threading.Thread(
+        target=_heartbeat, args=(conn, job_id, stop, cancel_event), name=f"beat-{job_id[:8]}", daemon=True
+    )
+    beat.start()
+    try:
+        _run_job(conn, job_id)
+    finally:
+        stop.set()
+        _CANCEL.pop(job_id, None)
+
+
 def _loop(conn: Any, generation: int) -> None:
     while True:
         current = _QUEUE
         if generation != _GENERATION or current is None:
             return
+        from_queue = True
         try:
-            job_id = current.get(timeout=0.5)
-        except Exception:  # noqa: BLE001 - cola vacía o cerrada
-            continue
+            job_id = current.get(timeout=POLL_S)
+        except Exception:  # noqa: BLE001 - cola vacía: se mira la base por si otro proceso encoló
+            from_queue = False
+            job_id = None
         if generation != _GENERATION or _QUEUE is not current:
-            try:
-                current.task_done()
-            except Exception:  # noqa: BLE001
-                pass
+            if from_queue:
+                try:
+                    current.task_done()
+                except Exception:  # noqa: BLE001
+                    pass
             return
         try:
+            requeue_stale(conn)
+            job_id = job_id or _next_queued(conn)
+        except Exception:  # noqa: BLE001 - la base puede fallar un momento
+            job_id = job_id if from_queue else None
+        if job_id is None:
+            continue
+        if not claim(conn, job_id):
+            if from_queue:
+                current.task_done()
+            continue
+        try:
             _purge_media_temp()
-            _run_job(conn, job_id)
+            _run_claimed(conn, job_id)
         except Exception as exc:  # noqa: BLE001
             try:
                 db.run(
@@ -187,10 +268,11 @@ def _loop(conn: Any, generation: int) -> None:
                 pass
         finally:
             _purge_media_temp()
-            try:
-                current.task_done()
-            except Exception:  # noqa: BLE001
-                pass
+            if from_queue:
+                try:
+                    current.task_done()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def _run_job(conn: Any, job_id: str) -> None:
@@ -421,6 +503,25 @@ def _run_job_progressive(conn: Any, job_id: str, job: Any, project: Any) -> None
     _ = job
     runner = live.start_for_project(conn, project, job_id=job_id)
     cancel_event = _CANCEL.get(job_id)
+    while runner is None:
+        if cancel_event is not None and cancel_event.wait(POLL_S):
+            return
+        current = db.one(conn, "SELECT * FROM projects WHERE id=?", (project["id"],))
+        if current is None:
+            return
+        if live.stored_snapshot(conn, current)["complete"]:
+            db.run(conn, "UPDATE projects SET status='COMPLETED' WHERE id=?", (project["id"],))
+            db.run(
+                conn,
+                "UPDATE jobs SET status='COMPLETED', stage='COMPLETED', progress=100, error='', updated_at=? "
+                "WHERE id=? AND status!='CANCELLED'",
+                (_utcnow(), job_id),
+            )
+            publish(job_id, {"type": "processing_completed", "job_id": job_id, "progress": 100,
+                             "status": "COMPLETED"})
+            return
+        if cluster.lease_owner(conn, str(project["id"])) is None:
+            runner = live.start_for_project(conn, current, job_id=job_id)
     while not runner.done.wait(0.5):
         if cancel_event is not None and cancel_event.is_set():
             runner.stop()

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
@@ -16,7 +15,7 @@ from fastapi import Request
 from fastapi import WebSocket
 from fastapi.responses import Response
 
-from app.presentation.api import db
+from app.presentation.api import cluster, db
 from app.presentation.api import mailer
 from app.presentation.api.common import COOKIE
 from app.presentation.api.common import WS_TICKET_TTL_S
@@ -50,7 +49,6 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
         if live_warm["started"]:
             return
         live_warm["started"] = True
-        import threading
 
         from app.presentation.api import live
 
@@ -77,27 +75,18 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
             raise HTTPException(status_code=401, detail="Sesión inválida")
         return row
 
-    ws_tickets: dict[str, tuple[str, float]] = {}
-
-    ws_tickets_lock = threading.Lock()
-
     def issue_ws_ticket(user_id: str) -> str:
         ticket = new_token()
-        now = time.monotonic()
-        with ws_tickets_lock:
-            for key in [k for k, (_u, exp) in ws_tickets.items() if exp < now]:
-                ws_tickets.pop(key, None)
-            ws_tickets[ticket] = (user_id, now + WS_TICKET_TTL_S)
+        cluster.issue_ticket(conn, token_hash(ticket), user_id, WS_TICKET_TTL_S)
         return ticket
 
     def user_from_socket(socket: WebSocket) -> sqlite3_row:
         ticket = socket.query_params.get("ticket") or ""
         if ticket:
-            with ws_tickets_lock:
-                entry = ws_tickets.pop(ticket, None)
-            if entry is None or entry[1] < time.monotonic():
+            user_id = cluster.consume_ticket(conn, token_hash(ticket))
+            if user_id is None:
                 raise HTTPException(status_code=401, detail="Ticket inválido o caducado")
-            row = db.one(conn, "SELECT * FROM users WHERE id=?", (entry[0],))
+            row = db.one(conn, "SELECT * FROM users WHERE id=?", (user_id,))
             if row is None:
                 raise HTTPException(status_code=401, detail="Sesión inválida")
             return row

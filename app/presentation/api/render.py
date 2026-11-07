@@ -8,7 +8,6 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
@@ -16,21 +15,30 @@ from typing import Any, Callable
 log = logging.getLogger("ia.render")
 
 _RENDER_SLOT = threading.Semaphore(1)
-_LOCK = threading.Lock()
-_JOBS: dict[tuple[str, str], "RenderJob"] = {}
+ACTIVE = ("queued", "running")
 
 
-@dataclass
-class RenderJob:
-    project_id: str
-    language: str
-    state: str = "queued"
-    progress: int = 0
-    error: str = ""
-    started: float = field(default_factory=time.monotonic)
+def _view(state: str, progress: int, error: str, language: str) -> dict[str, Any]:
+    return {"state": state, "progress": progress, "error": error, "language": language}
 
-    def as_dict(self) -> dict[str, Any]:
-        return {"state": self.state, "progress": self.progress, "error": self.error, "language": self.language}
+
+def _row(conn: Any, project_id: str, language: str) -> Any:
+    from app.presentation.api import db
+
+    return db.one(conn, "SELECT * FROM renders WHERE project_id=? AND language=?", (project_id, language))
+
+
+def _is_dead(row: Any) -> bool:
+    from app.presentation.api import cluster
+
+    return row["state"] in ACTIVE and float(row["heartbeat_at"] or 0) < cluster.stale_before()
+
+
+def stored_file(conn: Any, project_id: str, language: str, stamp: str | None = None) -> str | None:
+    row = _row(conn, project_id, language)
+    if row is None or row["state"] != "done" or not row["storage_key"]:
+        return None
+    return str(row["storage_key"]) if stamp is None or row["stamp"] == stamp else None
 
 
 def render_dir(output_root: Path, project_id: str) -> Path:
@@ -53,16 +61,17 @@ def ready_file(output_root: Path, project_id: str, language: str, stamp: str | N
     return video if stamp is None or saved.get("stamp") == stamp else None
 
 
-def status(output_root: Path, project_id: str, language: str, stamp: str) -> dict[str, Any]:
-    with _LOCK:
-        job = _JOBS.get((project_id, language))
-    if job is not None and job.state in {"queued", "running", "failed"}:
-        return job.as_dict()
-    if ready_file(output_root, project_id, language, stamp) is not None:
-        return {"state": "done", "progress": 100, "error": "", "language": language}
-    if ready_file(output_root, project_id, language) is not None:
-        return {"state": "stale", "progress": 100, "error": "", "language": language}
-    return {"state": "idle", "progress": 0, "error": "", "language": language}
+def status(conn: Any, output_root: Path, project_id: str, language: str, stamp: str) -> dict[str, Any]:
+    row = _row(conn, project_id, language)
+    if row is not None and _is_dead(row):
+        return _view("failed", int(row["progress"]), "El proceso que preparaba el vídeo se detuvo", language)
+    if row is not None and row["state"] in (*ACTIVE, "failed"):
+        return _view(row["state"], int(row["progress"]), row["error"], language)
+    if ready_file(output_root, project_id, language, stamp) or stored_file(conn, project_id, language, stamp):
+        return _view("done", 100, "", language)
+    if ready_file(output_root, project_id, language) or stored_file(conn, project_id, language):
+        return _view("stale", 100, "", language)
+    return _view("idle", 0, "", language)
 
 
 def _resolve(binary: str) -> str:
@@ -267,8 +276,79 @@ def burn(
         shutil.rmtree(work, ignore_errors=True)
 
 
+class _Progress:
+    def __init__(self, conn: Any, project_id: str, language: str, owner: str) -> None:
+        self.conn = conn
+        self.project_id = project_id
+        self.language = language
+        self.owner = owner
+        self.value = 0
+        self._written = 0.0
+
+    def save(self, *, state: str | None = None, error: str | None = None, storage_key: str | None = None,
+             force: bool = False) -> None:
+        from app.presentation.api import cluster, db
+
+        moment = cluster.now()
+        if not force and moment - self._written < 1.0:
+            return
+        self._written = moment
+        db.run(
+            self.conn,
+            "UPDATE renders SET progress=?, heartbeat_at=?, state=COALESCE(?, state), error=COALESCE(?, error), "
+            "storage_key=COALESCE(?, storage_key) WHERE project_id=? AND language=? AND owner=?",
+            (self.value, moment, state, error, storage_key, self.project_id, self.language, self.owner),
+        )
+
+    def set(self, value: int) -> None:
+        self.value = value
+        self.save()
+
+
+def _claim(conn: Any, project_id: str, language: str, stamp: str) -> str | None:
+    from app.presentation.api import cluster, db
+
+    owner = f"{cluster.INSTANCE_ID}:{uuid.uuid4().hex[:8]}"
+    moment = cluster.now()
+    with db.transaction(conn) as tx:
+        tx.run(
+            """
+            INSERT INTO renders (project_id, language, state, progress, error, stamp, owner, heartbeat_at, storage_key)
+            VALUES (?, ?, 'queued', 0, '', ?, ?, ?, '')
+            ON CONFLICT(project_id, language) DO UPDATE SET
+                state='queued', progress=0, error='', stamp=excluded.stamp, owner=excluded.owner,
+                heartbeat_at=excluded.heartbeat_at, storage_key=''
+            WHERE renders.state NOT IN ('queued', 'running') OR renders.heartbeat_at < ?
+            """,
+            (project_id, language, stamp, owner, moment, cluster.stale_before()),
+        )
+        row = tx.one("SELECT owner FROM renders WHERE project_id=? AND language=?", (project_id, language))
+    return owner if row is not None and row["owner"] == owner else None
+
+
+def _beat(progress: _Progress, stop: threading.Event) -> None:
+    from app.presentation.api import cluster
+
+    while not stop.wait(cluster.HEARTBEAT_S):
+        try:
+            progress.save(force=True)
+        except Exception:  # noqa: BLE001 - un fallo puntual de la base no corta el render
+            pass
+
+
+def _store_remote(project: Any, language: str, video: Path) -> str | None:
+    from app.presentation.api import media_store
+
+    if not media_store.configured():
+        return None
+    key = f"{project['user_id']}/{project['id']}/renders/{language}.mp4"
+    media_store.upload_file(video, key, "video/mp4")
+    return media_store.make_uri(os.environ.get("SUPABASE_BUCKET", "media"), key)
+
+
 def start(
     *,
+    conn: Any,
     output_root: Path,
     project: Any,
     language: str,
@@ -277,63 +357,68 @@ def start(
     source_of: Callable[[Any], Any],
 ) -> dict[str, Any]:
     project_id = str(project["id"])
-    key = (project_id, language)
-    with _LOCK:
-        current = _JOBS.get(key)
-        if current is not None and current.state in {"queued", "running"}:
-            return current.as_dict()
-        if ready_file(output_root, project_id, language, stamp) is not None:
-            return {"state": "done", "progress": 100, "error": "", "language": language}
-        job = RenderJob(project_id, language)
-        _JOBS[key] = job
+    row = _row(conn, project_id, language)
+    if row is not None and row["state"] in ACTIVE and not _is_dead(row):
+        return _view(row["state"], int(row["progress"]), "", language)
+    if ready_file(output_root, project_id, language, stamp) or stored_file(conn, project_id, language, stamp):
+        return _view("done", 100, "", language)
+    owner = _claim(conn, project_id, language, stamp)
+    if owner is None:
+        row = _row(conn, project_id, language)
+        return _view(row["state"], int(row["progress"]), row["error"], language)
+
+    progress = _Progress(conn, project_id, language, owner)
+    started = time.monotonic()
 
     def run() -> None:
         from app.infrastructure.subtitles.exporters import to_ass_burn
 
         video, meta = _paths(output_root, project_id, language)
-        with _RENDER_SLOT:
-            job.state = "running"
-            try:
-                def downloaded(fraction: float) -> None:
-                    job.progress = int(fraction * 10)
-
+        stop = threading.Event()
+        threading.Thread(target=_beat, args=(progress, stop), name=f"render-beat-{project_id[:8]}", daemon=True).start()
+        try:
+            with _RENDER_SLOT:
+                progress.save(state="running", force=True)
                 source = local_source(
-                    source_of(project), render_dir(output_root, project_id) / "source.media", downloaded
+                    source_of(project), render_dir(output_root, project_id) / "source.media",
+                    lambda fraction: progress.set(int(fraction * 10)),
                 )
                 width, height, duration_ms = probe(source)
                 ass = to_ass_burn(cues, language=language, width=width, height=height)
-
-                base = job.progress
-
-                def progress(value: int) -> None:
-                    job.progress = base + value * (100 - base) // 100
-
-                burn(source, ass, video, duration_ms=duration_ms, on_progress=progress)
+                base = progress.value
+                burn(source, ass, video, duration_ms=duration_ms,
+                     on_progress=lambda value: progress.set(base + value * (100 - base) // 100))
                 meta.write_text(json.dumps({"stamp": stamp, "language": language}), encoding="utf-8")
-                job.progress = 100
-                job.state = "done"
-                log.info(
-                    "render[%s/%s]: listo en %.1fs", project_id[:8], language, time.monotonic() - job.started
-                )
-            except Exception as exc:  # noqa: BLE001 - se informa al usuario, no se oculta
-                job.state = "failed"
-                job.error = str(exc)
-                log.warning("render[%s/%s]: falló: %s", project_id[:8], language, exc)
+                remote = _store_remote(project, language, video)
+                progress.value = 100
+                progress.save(state="done", storage_key=remote or "", force=True)
+                log.info("render[%s/%s]: listo en %.1fs", project_id[:8], language, time.monotonic() - started)
+        except Exception as exc:  # noqa: BLE001 - se informa al usuario, no se oculta
+            progress.save(state="failed", error=str(exc), force=True)
+            log.warning("render[%s/%s]: falló: %s", project_id[:8], language, exc)
+        finally:
+            stop.set()
 
     threading.Thread(target=run, name=f"render-{project_id[:8]}-{language}", daemon=True).start()
-    return job.as_dict()
+    return _view("queued", 0, "", language)
 
 
-def forget(output_root: Path, project_id: str) -> None:
-    with _LOCK:
-        for key in [k for k in _JOBS if k[0] == project_id]:
-            _JOBS.pop(key, None)
+def forget(conn: Any, output_root: Path, project_id: str) -> None:
+    from app.presentation.api import db, media_store
+
+    for row in db.many(conn, "SELECT storage_key FROM renders WHERE project_id=?", (project_id,)):
+        key = media_store.object_key(row["storage_key"]) if row["storage_key"] else ""
+        if key:
+            try:
+                media_store.delete(key)
+            except Exception:  # noqa: BLE001 - borrar el proyecto manda
+                pass
+    db.run(conn, "DELETE FROM renders WHERE project_id=?", (project_id,))
     shutil.rmtree(render_dir(output_root, project_id), ignore_errors=True)
 
 
 def reset() -> None:
-    with _LOCK:
-        _JOBS.clear()
+    return None
 
 
-__all__ = ["burn", "forget", "probe", "ready_file", "render_dir", "reset", "start", "status"]
+__all__ = ["burn", "forget", "probe", "ready_file", "render_dir", "reset", "start", "status", "stored_file"]

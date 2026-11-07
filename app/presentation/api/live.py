@@ -86,7 +86,7 @@ class LiveCallbacks:
     translate: Callable[[list[str], str, str], list[str]]
     detect: Callable[[Any], str]
     emit: Callable[[dict[str, Any]], None]
-    persist: Callable[[str, list[dict[str, Any]], int], None]
+    persist: Callable[..., None]
 
 
 class LiveSubtitler:
@@ -330,16 +330,19 @@ class LiveSubtitler:
             persisted = list(current)
             prefix = ranges.prefix_end()
         self.cb.emit(event)
-        self.cb.persist(language, persisted, prefix)
+        self.cb.persist(language, persisted, prefix, event["covered"])
 
 
 Listener = Callable[[dict[str, Any]], None]
 
 
 class LiveRunner:
-    def __init__(self, project_id: str, build: Callable[["LiveRunner"], LiveSubtitler]) -> None:
+    def __init__(
+        self, project_id: str, build: Callable[["LiveRunner"], LiveSubtitler], *, conn: Any = None
+    ) -> None:
         self.project_id = project_id
         self._build = build
+        self._conn = conn
         self._listeners: dict[int, Listener] = {}
         self._lock = threading.Lock()
         self._seq = 0
@@ -412,9 +415,32 @@ class LiveRunner:
     def start(self) -> None:
         threading.Thread(target=self._run, name=f"live-{self.project_id[:8]}", daemon=True).start()
 
+    def _keep_lease(self, stop: threading.Event) -> None:
+        from app.presentation.api import cluster
+
+        applied = 0.0
+        while not stop.wait(1.0):
+            try:
+                state = cluster.renew_lease(self._conn, self.project_id)
+            except Exception:  # noqa: BLE001 - un fallo puntual de la base no corta el proceso
+                continue
+            if state is None:
+                log.info("live[%s]: otro proceso tomó el proyecto o se borró; se detiene", self.project_id[:8])
+                self.stop()
+                return
+            position, language, at = state
+            if at > applied:
+                applied = at
+                self.set_position(position, language or None)
+
     def _run(self) -> None:
         log.info("live[%s]: procesamiento iniciado", self.project_id[:8])
         subtitler: LiveSubtitler | None = None
+        lease_stop = threading.Event()
+        if self._conn is not None:
+            threading.Thread(
+                target=self._keep_lease, args=(lease_stop,), name=f"lease-{self.project_id[:8]}", daemon=True
+            ).start()
         try:
             subtitler = self._build(self)
             with self._lock:
@@ -434,6 +460,14 @@ class LiveRunner:
                 self.metrics["completed"] = elapsed
                 log.info("live[%s]: completado en %.1fs", self.project_id[:8], elapsed)
                 self.emit({"type": "completed", "failed": sorted(subtitler.failed)})
+            lease_stop.set()
+            if self._conn is not None:
+                from app.presentation.api import cluster
+
+                try:
+                    cluster.release_lease(self._conn, self.project_id)
+                except Exception:  # noqa: BLE001 - la concesión caduca sola
+                    pass
             with _RUNNERS_LOCK:
                 if _RUNNERS.get(self.project_id) is self:
                     _RUNNERS.pop(self.project_id, None)
@@ -473,12 +507,18 @@ def ensure_runner(
     build: Callable[[LiveRunner], LiveSubtitler],
     *,
     job: tuple[Any, str] | None = None,
-) -> tuple[LiveRunner, bool]:
+    conn: Any = None,
+) -> tuple[LiveRunner | None, bool]:
     with _RUNNERS_LOCK:
         current = _RUNNERS.get(project_id)
         if current is not None and not current.done.is_set():
             return current, False
-        runner = LiveRunner(project_id, build)
+        if conn is not None:
+            from app.presentation.api import cluster
+
+            if not cluster.acquire_lease(conn, project_id):
+                return None, False
+        runner = LiveRunner(project_id, build, conn=conn)
         if job is not None:
             runner.attach_job(*job)
         _RUNNERS[project_id] = runner
@@ -554,6 +594,50 @@ def load_existing(conn: Any, project_id: str) -> dict[str, tuple[list[dict[str, 
     return existing
 
 
+def stored_snapshot(conn: Any, project: Any) -> dict[str, Any]:
+    from app.presentation.api import db
+
+    project_id = str(project["id"])
+    duration = int(project["duration_ms"] or 0)
+    source = str(project["source_language"] or "")
+    targets = [t for t in str(project["target_languages"] or "").split(",") if t]
+    tracks: dict[str, list[dict[str, Any]]] = {}
+    covered: dict[str, list[list[int]]] = {}
+    for row in db.many(conn, "SELECT * FROM subtitles WHERE project_id=?", (project_id,)):
+        code = str(row["language"])
+        try:
+            raw = json.loads(row["cues_json"]) or []
+        except (TypeError, json.JSONDecodeError):
+            raw = []
+        cues = [
+            {"start_ms": int(c["start_ms"]), "end_ms": int(c["end_ms"]), "text": str(c.get("text", ""))}
+            for c in raw
+            if isinstance(c, dict)
+        ]
+        tracks[code] = [dict(c, id=segment_id(code, c["start_ms"], c["end_ms"])) for c in cues]
+        keys = row.keys() if hasattr(row, "keys") else []
+        try:
+            ranges = json.loads(row["covered_json"]) if "covered_json" in keys else []
+        except (TypeError, json.JSONDecodeError):
+            ranges = []
+        if not ranges:
+            prefix = int(row["covered_ms"] or 0) if "covered_ms" in keys else 0
+            prefix = prefix or max((c["end_ms"] for c in cues), default=0)
+            ranges = [[0, prefix]] if prefix else []
+        covered[code] = [[int(a), int(b)] for a, b in ranges]
+    languages = [source] + [t for t in targets if t != source]
+
+    def full(code: str) -> bool:
+        spans = covered.get(code) or []
+        return bool(spans) and spans[0][0] <= 0 and spans[0][1] >= duration
+
+    complete = duration > 0 and source not in {"", "und"} and all(full(code) for code in languages)
+    return {
+        "source_language": source, "duration_ms": duration, "tracks": tracks,
+        "covered": covered, "failed": [], "complete": complete,
+    }
+
+
 class JobTracker:
     def __init__(self, conn: Any, job_id: str) -> None:
         self.conn = conn
@@ -614,13 +698,15 @@ class JobTracker:
         )
 
 
-def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> LiveRunner:
+def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> LiveRunner | None:
     from app.presentation.api import db
 
     project_id = str(project["id"])
     targets = [t.strip().lower() for t in str(project["target_languages"] or "").split(",") if t.strip()]
 
-    def persist(language: str, cues: list[dict[str, Any]], covered_ms: int) -> None:
+    def persist(
+        language: str, cues: list[dict[str, Any]], covered_ms: int, ranges: list[list[int]] | None = None
+    ) -> None:
         rows = [
             {
                 "id": cue.get("id") or segment_id(language, cue["start_ms"], cue["end_ms"]),
@@ -637,13 +723,16 @@ def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> 
         db.run(
             conn,
             """
-            INSERT INTO subtitles (project_id, language, cues_json, updated_at, covered_ms)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO subtitles (project_id, language, cues_json, updated_at, covered_ms, covered_json)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id, language) DO UPDATE SET
                 cues_json=excluded.cues_json, updated_at=excluded.updated_at,
-                covered_ms=excluded.covered_ms
+                covered_ms=excluded.covered_ms, covered_json=excluded.covered_json
             """,
-            (project_id, language, json.dumps(rows, ensure_ascii=False), _utcnow(), int(covered_ms)),
+            (
+                project_id, language, json.dumps(rows, ensure_ascii=False), _utcnow(), int(covered_ms),
+                json.dumps(ranges if ranges is not None else [[0, int(covered_ms)]]),
+            ),
         )
 
     def build(runner: LiveRunner) -> LiveSubtitler:
@@ -681,7 +770,10 @@ def start_for_project(conn: Any, project: Any, *, job_id: str | None = None) -> 
             existing=load_existing(conn, project_id),
         )
 
-    runner, created = ensure_runner(project_id, build, job=(conn, job_id) if job_id else None)
+    runner, created = ensure_runner(project_id, build, job=(conn, job_id) if job_id else None, conn=conn)
+    if runner is None:
+        log.info("live[%s]: lo procesa otro proceso", project_id[:8])
+        return None
     if job_id and runner.job_id != job_id:
         runner.attach_job(conn, job_id)
     if created:

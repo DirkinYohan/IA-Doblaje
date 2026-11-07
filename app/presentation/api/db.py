@@ -44,6 +44,36 @@ CREATE TABLE IF NOT EXISTS email_tokens (
     expires_at TEXT NOT NULL,
     used INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS ws_tickets (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rate_hits (
+    bucket TEXT NOT NULL,
+    at DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rate_hits_bucket ON rate_hits (bucket, at);
+CREATE TABLE IF NOT EXISTS live_leases (
+    project_id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    heartbeat_at DOUBLE PRECISION NOT NULL,
+    position_ms INTEGER NOT NULL DEFAULT 0,
+    position_lang TEXT NOT NULL DEFAULT '',
+    position_at DOUBLE PRECISION NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS renders (
+    project_id TEXT NOT NULL,
+    language TEXT NOT NULL,
+    state TEXT NOT NULL,
+    progress INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    stamp TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
+    heartbeat_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+    storage_key TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (project_id, language)
+);
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -83,12 +113,15 @@ _PROJECT_COLUMNS = {
     "updated_at": "TEXT NOT NULL DEFAULT ''",
 }
 _JOB_COLUMNS = {
+    "claimed_by": "TEXT NOT NULL DEFAULT ''",
+    "heartbeat_at": "DOUBLE PRECISION NOT NULL DEFAULT 0",
     "stage_history": "TEXT NOT NULL DEFAULT '[]'",
     "mode": "TEXT NOT NULL DEFAULT 'full'",
     "last_cue_ms": "INTEGER NOT NULL DEFAULT 0",
 }
 _SUBTITLE_COLUMNS = {
     "covered_ms": "INTEGER NOT NULL DEFAULT 0",
+    "covered_json": "TEXT NOT NULL DEFAULT '[]'",
 }
 
 

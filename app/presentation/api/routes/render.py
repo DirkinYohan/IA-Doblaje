@@ -8,10 +8,12 @@ from fastapi import APIRouter
 from fastapi import Cookie
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 
 from app.application.use_cases.build_subtitles import cue_from_dict
 from app.presentation.api import db
+from app.presentation.api import media_store
 from app.presentation.api.common import _own_project
 from app.presentation.api.context import ApiContext
 from app.presentation.api.schemas import RenderBody
@@ -46,7 +48,7 @@ def build(ctx: ApiContext) -> APIRouter:
             raise HTTPException(status_code=422, detail="Falta el idioma")
         project, cues, stamp = _render_track(project_id, row["id"], lang)
         return render.start(
-            output_root=paths["output"], project=project, language=lang, cues=cues,
+            conn=conn, output_root=paths["output"], project=project, language=lang, cues=cues,
             stamp=stamp, source_of=live.media_source,
         )
 
@@ -56,7 +58,7 @@ def build(ctx: ApiContext) -> APIRouter:
 
         row = user_from_cookie(ia_session)
         _project, _cues, stamp = _render_track(project_id, row["id"], lang)
-        return render.status(paths["output"], project_id, lang, stamp)
+        return render.status(conn, paths["output"], project_id, lang, stamp)
 
     @router.get("/api/videos/{project_id}/render/file")
     def render_file(project_id: str, lang: str, ia_session: str | None = Cookie(default=None)) -> Response:
@@ -68,6 +70,10 @@ def build(ctx: ApiContext) -> APIRouter:
         project, _cues, _stamp = _render_track(project_id, row["id"], lang)
         video = render.ready_file(paths["output"], project_id, lang)
         if video is None:
+            remote = render.stored_file(conn, project_id, lang)
+            url = media_store.signed_url(remote, expires_in=3600) if remote else None
+            if url:
+                return RedirectResponse(url, status_code=307)
             raise HTTPException(status_code=404, detail="El vídeo todavía no está listo")
         base = Path(str(project["title"] or "video")).stem.replace("_", " ").strip() or "video"
         name = f"{base} ({lang}).mp4"

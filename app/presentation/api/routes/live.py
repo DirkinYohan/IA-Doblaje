@@ -21,6 +21,47 @@ def build(ctx: ApiContext) -> APIRouter:
     user_from_socket = ctx.user_from_socket
     router = APIRouter()
 
+    async def _follow(socket: WebSocket, project_id: str) -> None:
+        import asyncio
+        import json
+
+        from app.presentation.api import cluster, live
+
+        async def _read_positions() -> None:
+            while True:
+                message = await socket.receive_json()
+                if message.get("type") == "position":
+                    await asyncio.to_thread(
+                        cluster.publish_position, conn, project_id,
+                        int(message.get("time_ms") or 0), str(message.get("language") or "") or None,
+                    )
+
+        reader = asyncio.create_task(_read_positions())
+        seq = 0
+        last = ""
+        try:
+            while not reader.done():
+                project = await asyncio.to_thread(db.one, conn, "SELECT * FROM projects WHERE id=?", (project_id,))
+                if project is None:
+                    break
+                snapshot = await asyncio.to_thread(live.stored_snapshot, conn, project)
+                key = json.dumps([snapshot["covered"], {k: len(v) for k, v in snapshot["tracks"].items()},
+                                  snapshot["source_language"]])
+                if key != last:
+                    last = key
+                    seq += 1
+                    await socket.send_json({"type": "snapshot", "seq": seq, **snapshot})
+                    if snapshot["complete"]:
+                        await socket.send_json({"type": "completed", "seq": seq, "failed": []})
+                if not snapshot["complete"] and await asyncio.to_thread(cluster.lease_owner, conn, project_id) is None:
+                    await socket.close(code=1012)
+                    break
+                await asyncio.wait({reader}, timeout=1.0)
+        except (WebSocketDisconnect, RuntimeError, ValueError):
+            pass
+        finally:
+            reader.cancel()
+
     @router.websocket("/api/videos/{project_id}/live")
     async def live_subtitles(socket: WebSocket, project_id: str) -> None:
         import asyncio
@@ -75,6 +116,10 @@ def build(ctx: ApiContext) -> APIRouter:
                 live.start_for_project, conn, project,
                 job_id=str(job["id"]) if job is not None and _job_is_running(str(job["status"])) else None,
             )
+
+        if runner is None:
+            await _follow(socket, project_id)
+            return
 
         loop = asyncio.get_running_loop()
         outbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()

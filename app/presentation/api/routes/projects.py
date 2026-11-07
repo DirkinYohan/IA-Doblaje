@@ -37,6 +37,29 @@ from app.presentation.api.context import ApiContext
 from app.presentation.api.schemas import RenameBody
 
 
+def _remove_when_free(path: Path, attempts: int = 30, interval: float = 1.0) -> None:
+    import threading
+    import time
+
+    def remove() -> bool:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            return False
+        return True
+
+    if remove():
+        return
+
+    def retry() -> None:
+        for _ in range(attempts):
+            time.sleep(interval)
+            if remove():
+                return
+
+    threading.Thread(target=retry, name="borrar-medio", daemon=True).start()
+
+
 def build(ctx: ApiContext) -> APIRouter:
     app = ctx.app
     conn = ctx.conn
@@ -206,9 +229,10 @@ def build(ctx: ApiContext) -> APIRouter:
         running = live.get_runner(project_id)
         if running is not None:
             running.stop()
+            running.done.wait(5)
         from app.presentation.api import render
 
-        render.forget(paths["output"], project_id)
+        render.forget(conn, paths["output"], project_id)
 
         media_path = project["media_path"]
         if media_store.is_remote(media_path):
@@ -219,9 +243,7 @@ def build(ctx: ApiContext) -> APIRouter:
                 except Exception:  # noqa: BLE001 - borrar el proyecto manda
                     pass
         else:
-            media = Path(media_path)
-            if media.is_file():
-                media.unlink()
+            _remove_when_free(Path(media_path))
 
         thumb_path = str(project["thumbnail_path"] or "")
         if media_store.is_remote(thumb_path):
@@ -233,6 +255,7 @@ def build(ctx: ApiContext) -> APIRouter:
                     pass
 
         with db.transaction(conn) as tx:
+            tx.run("DELETE FROM live_leases WHERE project_id=?", (project_id,))
             tx.run("DELETE FROM subtitles WHERE project_id=?", (project_id,))
             tx.run("DELETE FROM jobs WHERE project_id=?", (project_id,))
             tx.run("DELETE FROM projects WHERE id=?", (project_id,))
