@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 
 from app.presentation.api import db
 from app.presentation.api import media_store
+from app.presentation.api import media_upload
 from app.presentation.api import storage_fit
 from app.presentation.api.common import OFFICIAL
 from app.presentation.api.common import UPLOAD_CHUNK
@@ -145,63 +146,37 @@ def build(ctx: ApiContext) -> APIRouter:
 
         duration_ms = _probe_duration_ms(target)
 
+        background: dict[str, Any] | None = None
         if use_storage:
-            stored_name = filename
             try:
-                fitted = storage_fit.fit(target, duration_ms, target.with_name(f"{project_id}-fit.mp4"))
+                compress = storage_fit.needs_fit(written, duration_ms)
             except storage_fit.TooLongForStorage as exc:
                 target.unlink(missing_ok=True)
                 raise HTTPException(status_code=413, detail=str(exc)) from exc
-            except Exception as exc:
-                target.unlink(missing_ok=True)
-                target.with_name(f"{project_id}-fit.mp4").unlink(missing_ok=True)
-                _raise_engine_error("No se pudo comprimir el vídeo", exc)
-            if fitted != target:
-                target.unlink(missing_ok=True)
-                target = fitted
-                stored_name = f"{Path(filename).stem}.mp4"
+            stored_name = f"{Path(filename).stem}.mp4" if compress else filename
             media_key = f"{row['id']}/{project_id}/{stored_name}"
             thumb_key = f"{row['id']}/{project_id}/thumbnail.jpg"
             thumb_temp = paths["temp"] / "uploads" / f"{project_id}-thumbnail.jpg"
             has_thumb = _write_thumbnail(target, thumb_temp)
             try:
-                media_store.upload_file(target, media_key, _guess_mime(stored_name))
-                if has_thumb:
-                    media_store.upload_bytes(
-                        thumb_temp.read_bytes(), thumb_key, "image/jpeg"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                target.unlink(missing_ok=True)
-                thumb_temp.unlink(missing_ok=True)
-                if "413" in str(exc):
-                    raise HTTPException(
-                        status_code=413,
-                        detail=(
-                            "El almacenamiento rechaza el archivo por tamaño "
-                            "(límite del plan de Supabase). Prueba con un vídeo "
-                            "más ligero o amplía el plan."
-                        ),
-                    ) from exc
-                _raise_engine_error("No se pudo subir el archivo al almacenamiento", exc)
-            finally:
-                thumb_temp.unlink(missing_ok=True)
-
-            try:
-                suffix = target.suffix
-                pending = media_store.pending_path(paths["temp"], project_id, suffix)
+                pending = media_store.pending_path(paths["temp"], project_id, target.suffix)
                 pending.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(target), str(pending))
-            except Exception:  # noqa: BLE001
-                target.unlink(missing_ok=True)
+                try:
+                    os.link(target, pending)
+                except OSError:
+                    shutil.copyfile(target, pending)
+            except Exception:  # noqa: BLE001 - el worker usará la copia en preparación
+                pass
 
-            media_value = media_store.make_uri(
-                os.environ.get("SUPABASE_BUCKET", "media"), media_key
-            )
-            thumb_value = (
-                media_store.make_uri(os.environ.get("SUPABASE_BUCKET", "media"), thumb_key)
-                if has_thumb
-                else ""
-            )
+            bucket = os.environ.get("SUPABASE_BUCKET", "media")
+            media_value = media_store.make_uri(bucket, media_key)
+            thumb_value = media_store.make_uri(bucket, thumb_key) if has_thumb else ""
+            background = {
+                "project_id": project_id, "source": target, "duration_ms": duration_ms,
+                "media_key": media_key, "content_type": _guess_mime(stored_name),
+                "thumbnail": thumb_temp if has_thumb else None, "thumbnail_key": thumb_key,
+                "still_exists": lambda: db.one(conn, "SELECT id FROM projects WHERE id=?", (project_id,)) is not None,
+            }
         else:
             thumbnail = folder / "thumbnail.jpg"
             has_thumb = _write_thumbnail(target, thumbnail)
@@ -220,6 +195,8 @@ def build(ctx: ApiContext) -> APIRouter:
                 _now(), duration_ms, thumb_value, _now(),
             ),
         )
+        if background is not None:
+            media_upload.store_in_background(**background)
         job_id = _create_job(conn, project_id, row["id"], "progressive", start=app.state.worker_enabled)
         uploaded = db.one(conn, "SELECT * FROM projects WHERE id=?", (project_id,))
         if uploaded is not None and app.state.worker_enabled:
@@ -294,6 +271,9 @@ def build(ctx: ApiContext) -> APIRouter:
         media_path = project["media_path"]
 
         if media_store.is_remote(media_path):
+            local = media_store.find_pending(paths["temp"], project_id)
+            if local is not None:
+                return FileResponse(local, media_type=_guess_mime(local.name))
             url = media_store.signed_url(media_path, expires_in=3600)
             if url:
                 return RedirectResponse(url, status_code=307)
@@ -347,6 +327,9 @@ def build(ctx: ApiContext) -> APIRouter:
             raise HTTPException(status_code=404, detail="Sin miniatura")
 
         if media_store.is_remote(raw):
+            local = media_store.staged(project_id, "thumbnail")
+            if local is not None:
+                return FileResponse(local, media_type="image/jpeg")
             url = media_store.signed_url(raw, expires_in=3600)
             if not url:
                 raise HTTPException(status_code=503, detail="Almacenamiento no disponible")

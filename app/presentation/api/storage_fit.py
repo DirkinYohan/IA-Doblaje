@@ -7,6 +7,7 @@ supera, se recodifica a H.264 con la tasa de bits justa para caber.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -46,7 +47,10 @@ def _too_long(limit: int) -> TooLongForStorage:
 
 def _command(ffmpeg: str, source: Path, target: Path, kbps: int) -> list[str]:
     height = 720 if kbps < 2500 else 1080
+    nice = shutil.which("nice") if os.name == "posix" else None
+    # Prioridad mínima: la transcripción en vivo comparte las mismas CPU.
     return [
+        *([nice, "-n", "19"] if nice else []),
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", f"scale=-2:'min({height},ih)'",
@@ -68,6 +72,17 @@ def _ffmpeg() -> str:
     return path
 
 
+def needs_fit(size: int, duration_ms: int, *, limit: int | None = None) -> bool:
+    """True si hay que comprimir; lanza TooLongForStorage si ni comprimido cabe."""
+    limit = limit or limit_bytes()
+    if size <= limit:
+        return False
+    kbps = video_kbps(limit, duration_ms) if duration_ms > 0 else 0
+    if kbps < MIN_VIDEO_KBPS:
+        raise _too_long(limit)
+    return True
+
+
 def fit(
     source: Path,
     duration_ms: int,
@@ -78,11 +93,9 @@ def fit(
 ) -> Path:
     """Devuelve `source` si ya cabe; si no, `target` con el vídeo comprimido."""
     limit = limit or limit_bytes()
-    if source.stat().st_size <= limit:
+    if not needs_fit(source.stat().st_size, duration_ms, limit=limit):
         return source
-    kbps = video_kbps(limit, duration_ms) if duration_ms > 0 else 0
-    if kbps < MIN_VIDEO_KBPS:
-        raise _too_long(limit)
+    kbps = video_kbps(limit, duration_ms)
     ffmpeg = _ffmpeg()
     for share in (1.0, 0.8):
         run(_command(ffmpeg, source, target, int(kbps * share)),

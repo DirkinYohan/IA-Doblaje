@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,12 @@ def materialize(
     if not key:
         raise StorageError(f"ruta de Storage inválida: {media_path}")
 
+    parts = key.split("/")
+    if len(parts) == 3:
+        local = find_pending(temp_dir, parts[1])
+        if local is not None:
+            return local
+
     name = f"{label}-{uuid.uuid4().hex}{suffix or Path(key).suffix}"
     target = temp_dir / "materialized" / name
     store.download_to(key, target)
@@ -121,14 +128,35 @@ def pending_path(temp_dir: Path, project_id: str, suffix: str = "") -> Path:
     return Path(temp_dir) / "pending" / f"{project_id}{suffix}"
 
 
+_STAGED: dict[str, dict[str, Path | None]] = {}
+_STAGED_LOCK = threading.Lock()
+
+
+def stage(project_id: str, media: Path, thumbnail: Path | None = None) -> None:
+    """Copia local disponible mientras el vídeo se guarda en Storage en segundo plano."""
+    with _STAGED_LOCK:
+        _STAGED[project_id] = {"media": media, "thumbnail": thumbnail}
+
+
+def unstage(project_id: str) -> None:
+    with _STAGED_LOCK:
+        _STAGED.pop(project_id, None)
+
+
+def staged(project_id: str, kind: str = "media") -> Path | None:
+    with _STAGED_LOCK:
+        entry = _STAGED.get(project_id)
+    path = entry.get(kind) if entry else None
+    return path if path is not None and path.is_file() else None
+
+
 def find_pending(temp_dir: Path, project_id: str) -> Path | None:
     folder = Path(temp_dir) / "pending"
-    if not folder.is_dir():
-        return None
-    for candidate in folder.glob(f"{project_id}.*"):
-        if candidate.is_file() and candidate.stat().st_size > 0:
-            return candidate
-    return None
+    if folder.is_dir():
+        for candidate in folder.glob(f"{project_id}.*"):
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return candidate
+    return staged(project_id)
 
 
 def drop_pending(temp_dir: Path, project_id: str) -> None:
