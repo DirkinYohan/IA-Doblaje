@@ -39,7 +39,10 @@ done
 az provider register --namespace Microsoft.App --wait >/dev/null
 az group create --name "$RG" --location "$LOCATION" --output none
 
-if ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$RG" --output none 2>/dev/null; then
+# IA_AZ_ENVIRONMENT_ID reutiliza un entorno existente (p. ej. si la suscripción solo admite uno).
+if [ -n "${IA_AZ_ENVIRONMENT_ID:-}" ]; then
+  ENVIRONMENT="$IA_AZ_ENVIRONMENT_ID"
+elif ! az containerapp env show --name "$ENVIRONMENT" --resource-group "$RG" --output none 2>/dev/null; then
   az containerapp env create --name "$ENVIRONMENT" --resource-group "$RG" --location "$LOCATION" \
     --logs-destination none --output none
 fi

@@ -43,6 +43,15 @@ de tu `.env`. Al final imprime la URL del backend.
 
 Para desplegar una versión concreta: `deploy/azure.sh <commit>`.
 
+Si la suscripción ya tiene un entorno de Container Apps (algunas solo admiten
+uno), reutilízalo; la app sigue siendo independiente de las demás:
+
+```bash
+export MSYS_NO_PATHCONV=1   # solo en Git Bash de Windows
+IA_AZ_ENVIRONMENT_ID=$(az containerapp env show -n <entorno> -g <grupo> --query id -o tsv) \
+IA_PUBLIC_URL=https://<tu-app>.vercel.app deploy/azure.sh
+```
+
 ## 3. Frontend en Vercel
 
 Importa el repositorio `video_subtitles` en Vercel y define una variable:
