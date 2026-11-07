@@ -120,9 +120,32 @@ class M2M100TranslatorAdapter(TranslatorPort):
         self._max_length = int(max_length)
         self._num_beams = int(num_beams)
         self._do_sample = bool(do_sample)
+        self._ct2: Any = _ct2_fallback(self._loader) if model_loader is None else None
 
     def _get_engine(self) -> Any:
         return self._loader.load()
+
+    def load(self) -> None:
+        if self._ct2 is not None:
+            self._ct2.load()
+        else:
+            self._get_engine()
+
+    def _translate_ct2(
+        self, texts: list[str], source_language: TranslationLanguageCode, target_language: TranslationLanguageCode
+    ) -> list[str]:
+        from app.core.exceptions import TranslationError
+
+        try:
+            outs = self._ct2.translate_batch([str(t) for t in texts], str(source_language), str(target_language))
+        except Exception as exc:  # noqa: BLE001
+            raise TranslationError(
+                f"Error de traducción M2M100 ({source_language}->{target_language}): {exc!r}"
+            ) from exc
+        for out in outs:
+            if self._is_degenerate(out):
+                raise TranslationError("Salida degenerada de M2M100. No se sustituye por el texto original.")
+        return outs
 
     def translate(
         self,
@@ -138,6 +161,8 @@ class M2M100TranslatorAdapter(TranslatorPort):
         text = str(source_text).strip()
         if not text:
             return ""
+        if self._ct2 is not None:
+            return self._translate_ct2([text], source_language, target_language)[0]
 
         model, tokenizer = self._get_engine()
         try:
@@ -178,6 +203,8 @@ class M2M100TranslatorAdapter(TranslatorPort):
     ) -> list[str]:
         if not texts:
             return []
+        if self._ct2 is not None:
+            return self._translate_ct2(texts, source_language, target_language)
         model, tokenizer = self._get_engine()
         tokenizer.src_lang = str(source_language)
         encoded = tokenizer(
@@ -226,6 +253,24 @@ class M2M100TranslatorAdapter(TranslatorPort):
         if len(s) > 3 and not re.search(r"[A-Za-z\u00C0-\u017F]", s):
             return True
         return False
+
+
+def _ct2_fallback(loader: Any) -> Any:
+    """En producción la imagen no trae PyTorch ni sus pesos: se usa la versión CTranslate2."""
+    import importlib.util
+
+    try:
+        weights = loader._model_dir() / "pytorch_model.bin"
+        has_pytorch = weights.is_file() and importlib.util.find_spec("torch") is not None
+        if has_pytorch:
+            return None
+        from app.infrastructure.translation import m2m100_ct2_adapter
+
+        if m2m100_ct2_adapter.is_available(loader._get_models_dir()):
+            return m2m100_ct2_adapter.shared()
+    except Exception:  # noqa: BLE001 - sin alternativa se usa la ruta de siempre
+        return None
+    return None
 
 
 __all__ = [

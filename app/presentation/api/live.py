@@ -810,7 +810,7 @@ def _translator() -> Callable[[list[str], str, str], list[str]]:
             from app.infrastructure.translation import m2m100_ct2_adapter
 
             if m2m100_ct2_adapter.is_available():
-                engine = m2m100_ct2_adapter.M2M100CT2Translator()
+                engine = m2m100_ct2_adapter.shared()
                 engine.load()
                 _holder["mt"] = engine.translate_batch
             else:

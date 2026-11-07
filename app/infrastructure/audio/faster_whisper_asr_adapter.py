@@ -260,11 +260,18 @@ class FasterWhisperLocalModelLoader:
         if compute_type is None:
             compute_type = "int8_float16"
         local_abs_path_str = str(Path(model_folder).expanduser().resolve())
+        from app.core.cpu import thread_count
+
+        extra: dict[str, Any] = {}
+        threads = thread_count()
+        if device == "cpu" and threads > 0:
+            extra["cpu_threads"] = threads
         try:
             model = _WhisperModel_cls(
                 local_abs_path_str,
                 device=device,
                 compute_type=compute_type,
+                **extra,
             )
         except (ModelLoadError, ConfigurationError):
             raise

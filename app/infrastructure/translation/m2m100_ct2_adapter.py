@@ -39,8 +39,11 @@ class M2M100CT2Translator:
             self._tokenizer = M2M100Tokenizer.from_pretrained(
                 str(self.root / TOKENIZER_FOLDERNAME), local_files_only=True
             )
+            from app.core.cpu import thread_count
+
             self._engine = ctranslate2.Translator(
-                str(self.root / CT2_FOLDERNAME), device="cpu", compute_type="int8"
+                str(self.root / CT2_FOLDERNAME), device="cpu", compute_type="int8",
+                intra_threads=thread_count(),
             )
 
     def translate_batch(self, texts: list[str], source: str, target: str) -> list[str]:
@@ -65,4 +68,17 @@ class M2M100CT2Translator:
         return out
 
 
-__all__ = ["CT2_FOLDERNAME", "M2M100CT2Translator", "is_available", "models_dir"]
+_SHARED: M2M100CT2Translator | None = None
+_SHARED_LOCK = threading.Lock()
+
+
+def shared() -> M2M100CT2Translator:
+    """Una sola instancia por proceso: el modelo ocupa memoria y no debe cargarse dos veces."""
+    global _SHARED
+    with _SHARED_LOCK:
+        if _SHARED is None:
+            _SHARED = M2M100CT2Translator()
+        return _SHARED
+
+
+__all__ = ["CT2_FOLDERNAME", "M2M100CT2Translator", "is_available", "models_dir", "shared"]
