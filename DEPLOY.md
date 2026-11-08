@@ -17,8 +17,11 @@
 - Si se duerme a mitad de un trabajo, al despertar vuelve a la cola y continúa
   desde lo guardado.
 
-Recursos: 2 vCPU y 4 GiB, 1 réplica como máximo. La concesión gratuita mensual
-de Azure (180 000 vCPU-s y 360 000 GiB-s) da para unas 25 horas activas.
+Recursos: 4 vCPU y 8 GiB, 1 réplica como máximo (con 2 vCPU los vídeos largos
+se paraban). La concesión gratuita mensual de Azure (180 000 vCPU-s y
+360 000 GiB-s, compartida por toda la suscripción) da para unas 12,5 horas
+activas; después, unos 0,43 USD por hora despierto. Para volver a 2 vCPU:
+`IA_AZ_CPU=2 IA_AZ_MEMORY=4Gi deploy/azure.sh`.
 
 ## 1. Imagen
 

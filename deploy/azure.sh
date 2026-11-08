@@ -10,6 +10,8 @@ RG="${IA_AZ_RESOURCE_GROUP:-ia-doblaje-rg}"
 LOCATION="${IA_AZ_LOCATION:-canadacentral}"
 ENVIRONMENT="${IA_AZ_ENVIRONMENT:-ia-doblaje-env}"
 APP="${IA_AZ_APP:-ia-doblaje-api}"
+CPU="${IA_AZ_CPU:-4}"
+MEMORY="${IA_AZ_MEMORY:-8Gi}"
 IMAGE="ghcr.io/dirkinyohan/ia-doblaje-api:${1:-latest}"
 
 value() {
@@ -83,14 +85,14 @@ fi
 if az containerapp show --name "$APP" --resource-group "$RG" --output none 2>/dev/null; then
   az containerapp secret set --name "$APP" --resource-group "$RG" --secrets "${SECRETS[@]}" --output none
   az containerapp update --name "$APP" --resource-group "$RG" --image "$IMAGE" \
-    --cpu 2 --memory 4Gi --min-replicas 0 --max-replicas 1 \
+    --cpu "$CPU" --memory "$MEMORY" --min-replicas 0 --max-replicas 1 \
     --set-env-vars "${ENV_VARS[@]}" --output none
   # Los secretos nuevos solo se aplican al reiniciar la revisión.
   REVISION=$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.latestRevisionName -o tsv)
   az containerapp revision restart --name "$APP" --resource-group "$RG" --revision "$REVISION" --output none
 else
   az containerapp create --name "$APP" --resource-group "$RG" --environment "$ENVIRONMENT" \
-    --image "$IMAGE" --cpu 2 --memory 4Gi --min-replicas 0 --max-replicas 1 \
+    --image "$IMAGE" --cpu "$CPU" --memory "$MEMORY" --min-replicas 0 --max-replicas 1 \
     --ingress external --target-port 10000 --transport auto \
     --secrets "${SECRETS[@]}" --env-vars "${ENV_VARS[@]}" --output none
   NEW_FQDN=$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.configuration.ingress.fqdn -o tsv)
