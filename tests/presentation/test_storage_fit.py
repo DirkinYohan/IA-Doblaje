@@ -43,7 +43,23 @@ def test_tasa_de_bits_respeta_el_limite() -> None:
     kbps = storage_fit.video_kbps(limit, 600_000)
     total_bits = (kbps + storage_fit.AUDIO_KBPS) * 1000 * 600
     assert total_bits / 8 <= limit
-    assert storage_fit.max_minutes(limit) == 17
+    assert storage_fit.max_minutes(limit) == 25
+
+
+def test_admite_25_minutos_y_no_mas() -> None:
+    limit = 50 * 1024 * 1024
+    assert storage_fit.needs_fit(limit + 1, 25 * 60_000, limit=limit) is True
+    assert storage_fit.needs_fit(limit + 1, 25 * 60_000 + 59_000, limit=limit) is True
+    with pytest.raises(storage_fit.TooLongForStorage, match="25 minutos"):
+        storage_fit.needs_fit(limit + 1, 26 * 60_000, limit=limit)
+    assert storage_fit.audio_kbps(limit, 25 * 60_000) == 64
+    assert storage_fit.audio_kbps(limit, 5 * 60_000) == 128
+    total = (storage_fit.video_kbps(limit, 25 * 60_000) + 64) * 1000 * 25 * 60 / 8
+    assert total <= limit
+
+
+def test_un_video_largo_pequeno_no_se_toca() -> None:
+    assert storage_fit.needs_fit(1000, 60 * 60_000, limit=2000) is False
 
 
 @pytest.mark.skipif(FFMPEG is None, reason="sin ffmpeg")
