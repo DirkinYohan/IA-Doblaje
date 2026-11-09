@@ -188,7 +188,7 @@ def build(ctx: ApiContext) -> APIRouter:
             except Exception:  # noqa: BLE001 - el worker usará la copia en preparación
                 pass
 
-            bucket = os.environ.get("SUPABASE_BUCKET", "media")
+            bucket = media_store.bucket()
             media_value = media_store.make_uri(bucket, media_key)
             thumb_value = media_store.make_uri(bucket, thumb_key) if has_thumb else ""
             background = {

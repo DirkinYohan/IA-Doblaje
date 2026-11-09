@@ -25,7 +25,16 @@ class TooLongForStorage(ValueError):
 
 
 def limit_bytes() -> int:
-    return int(float(os.environ.get("IA_STORAGE_MAX_MB", "50")) * 1024 * 1024)
+    """Tamaño máximo por archivo; 0 = sin límite (no se comprime).
+
+    Solo el plan gratuito de Supabase limita a 50 MB; Azure Blob no tiene ese tope.
+    """
+    explicit = os.environ.get("IA_STORAGE_MAX_MB", "").strip()
+    if explicit:
+        return int(float(explicit) * 1024 * 1024)
+    from app.presentation.api import media_store
+
+    return 50 * 1024 * 1024 if media_store.backend() == "supabase" else 0
 
 
 def max_minutes(_limit: int | None = None) -> int:
@@ -96,8 +105,8 @@ def _ffmpeg() -> str:
 
 def needs_fit(size: int, duration_ms: int, *, limit: int | None = None) -> bool:
     """True si hay que comprimir; lanza TooLongForStorage si ni comprimido cabe."""
-    limit = limit or limit_bytes()
-    if size <= limit:
+    limit = limit if limit is not None else limit_bytes()
+    if limit <= 0 or size <= limit:
         return False
     # «25 minutos» incluye 25:59: se rechaza a partir del minuto siguiente.
     if duration_ms <= 0 or duration_ms >= (max_minutes() + 1) * 60_000:
@@ -116,7 +125,7 @@ def fit(
     run: Callable[..., Any] = subprocess.run,
 ) -> Path:
     """Devuelve `source` si ya cabe; si no, `target` con el vídeo comprimido."""
-    limit = limit or limit_bytes()
+    limit = limit if limit is not None else limit_bytes()
     if not needs_fit(source.stat().st_size, duration_ms, limit=limit):
         return source
     kbps = video_kbps(limit, duration_ms)

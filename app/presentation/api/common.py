@@ -269,7 +269,7 @@ def _ensure_project_metadata(conn: Any, input_root: Path, project: Any) -> Any:
             candidate = Path(media).parent / "thumbnail.jpg"
             if _write_thumbnail(media, candidate):
                 if remote:
-                    bucket = os.environ.get("SUPABASE_BUCKET", "media")
+                    bucket = media_store.bucket()
                     key = f"{project['user_id']}/{project['id']}/thumbnail.jpg"
                     media_store.upload_bytes(candidate.read_bytes(), key, "image/jpeg")
                     new_thumbnail = media_store.make_uri(bucket, key)

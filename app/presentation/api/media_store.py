@@ -30,16 +30,63 @@ def object_key(media_path: Any) -> str:
     return key
 
 
+def backend() -> str:
+    """'azure', 'supabase' o 'local'. IA_STORAGE_BACKEND manda; si no, se elige por las claves."""
+    from app.core.env import env
+    from app.infrastructure.storage.azure_blob_storage import AzureBlobStorage
+
+    forced = env("IA_STORAGE_BACKEND").lower()
+    if forced in {"local", "azure", "supabase"}:
+        return forced
+    if AzureBlobStorage.configured():
+        return "azure"
+    if SupabaseStorage.configured():
+        return "supabase"
+    return "local"
+
+
 def configured() -> bool:
+    kind = backend()
+    if kind == "azure":
+        from app.infrastructure.storage.azure_blob_storage import AzureBlobStorage
+
+        return AzureBlobStorage.configured()
+    if kind == "supabase":
+        return SupabaseStorage.configured()
+    return False
+
+
+def bucket() -> str:
+    """Nombre del contenedor que se guarda en las rutas storage://<contenedor>/<clave>."""
     from app.core.env import env
 
-    if env("IA_STORAGE_BACKEND").lower() == "local":
-        return False
-    return SupabaseStorage.configured()
+    if backend() == "azure":
+        return env("AZURE_STORAGE_CONTAINER", "media") or "media"
+    return env("SUPABASE_BUCKET", "media") or "media"
 
 
-def client() -> SupabaseStorage | None:
-    return SupabaseStorage.from_env()
+_CLIENTS: dict[str, Any] = {}
+_CLIENTS_LOCK = threading.Lock()
+
+
+def client() -> Any:
+    from app.core.env import env
+
+    kind = backend()
+    if kind == "supabase":
+        return SupabaseStorage.from_env()
+    if kind != "azure":
+        return None
+    connection = env("AZURE_STORAGE_CONNECTION_STRING")
+    if not connection:
+        return None
+    cache_key = f"{connection}|{bucket()}"
+    with _CLIENTS_LOCK:
+        if cache_key not in _CLIENTS:
+            from app.infrastructure.storage.azure_blob_storage import AzureBlobStorage
+
+            _CLIENTS[cache_key] = AzureBlobStorage(connection_string=connection, container=bucket())
+        return _CLIENTS[cache_key]
 
 
 def save_stream_to_temp(chunks: Any, target: Path, *, max_bytes: int) -> int:

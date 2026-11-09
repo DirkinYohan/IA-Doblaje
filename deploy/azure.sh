@@ -26,15 +26,14 @@ value() {
 }
 
 DATABASE_URL="$(value IA_DATABASE_URL)"
-SUPABASE_URL="$(value SUPABASE_URL)"
-SUPABASE_KEY="$(value SUPABASE_SERVICE_ROLE_KEY)"
-SUPABASE_BUCKET="$(value SUPABASE_BUCKET)"
+STORAGE_CONNECTION="$(value AZURE_STORAGE_CONNECTION_STRING)"
+STORAGE_CONTAINER="$(value AZURE_STORAGE_CONTAINER)"
 BREVO_KEY="$(value BREVO_API_KEY)"
 MAIL_FROM="$(value MAIL_FROM_EMAIL)"
 MAIL_NAME="$(value MAIL_FROM_NAME)"
 PUBLIC_URL="${IA_PUBLIC_URL:-https://example.com}"
 
-for name in DATABASE_URL SUPABASE_URL SUPABASE_KEY BREVO_KEY MAIL_FROM; do
+for name in DATABASE_URL STORAGE_CONNECTION BREVO_KEY MAIL_FROM; do
   if [ -z "${!name}" ]; then
     echo "Falta $name en .env" >&2
     exit 1
@@ -61,15 +60,15 @@ fi
 
 SECRETS=(
   "database-url=$DATABASE_URL"
-  "supabase-key=$SUPABASE_KEY"
+  "storage-connection=$STORAGE_CONNECTION"
   "brevo-key=$BREVO_KEY"
 )
 ENV_VARS=(
   "IA_DATABASE_URL=secretref:database-url"
-  "SUPABASE_SERVICE_ROLE_KEY=secretref:supabase-key"
+  "AZURE_STORAGE_CONNECTION_STRING=secretref:storage-connection"
   "BREVO_API_KEY=secretref:brevo-key"
-  "SUPABASE_URL=$SUPABASE_URL"
-  "SUPABASE_BUCKET=${SUPABASE_BUCKET:-media}"
+  "IA_STORAGE_BACKEND=azure"
+  "AZURE_STORAGE_CONTAINER=${STORAGE_CONTAINER:-media}"
   "MAIL_FROM_EMAIL=$MAIL_FROM"
   "MAIL_FROM_NAME=${MAIL_NAME:-IA Doblaje}"
   "APP_PUBLIC_URL=$PUBLIC_URL"
@@ -87,6 +86,13 @@ if az containerapp show --name "$APP" --resource-group "$RG" --output none 2>/de
   az containerapp update --name "$APP" --resource-group "$RG" --image "$IMAGE" \
     --cpu "$CPU" --memory "$MEMORY" --min-replicas 0 --max-replicas 1 \
     --set-env-vars "${ENV_VARS[@]}" --output none
+  # Restos de cuando los vídeos estaban en Supabase.
+  if az containerapp show --name "$APP" --resource-group "$RG"       --query "properties.template.containers[0].env[?name=='SUPABASE_URL'] | length(@)" -o tsv | grep -q '^1$'; then
+    az containerapp update --name "$APP" --resource-group "$RG"       --remove-env-vars SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SUPABASE_BUCKET --output none
+  fi
+  if az containerapp secret list --name "$APP" --resource-group "$RG" --query "[?name=='supabase-key'] | length(@)" -o tsv | grep -q '^1$'; then
+    az containerapp secret remove --name "$APP" --resource-group "$RG" --secret-names supabase-key --output none
+  fi
   # Los secretos nuevos solo se aplican al reiniciar la revisión.
   REVISION=$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.latestRevisionName -o tsv)
   az containerapp revision restart --name "$APP" --resource-group "$RG" --revision "$REVISION" --output none

@@ -254,6 +254,10 @@ class _Rows:
         return list(self._rows)
 
 
+def _dead(raw: Any) -> bool:
+    return bool(getattr(raw, "broken", False) or getattr(raw, "closed", False))
+
+
 class PooledConnection:
     backend = "postgres"
 
@@ -261,9 +265,25 @@ class PooledConnection:
         self.pool = pool
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _Rows:
-        with self.pool.connection() as raw:
-            cursor = raw.execute(_translate(sql), params)
-            return _Rows(cursor.fetchall() if cursor.description else [])
+        import psycopg
+
+        for attempt in (1, 2):
+            retry = False
+            with self.pool.connection() as raw:
+                try:
+                    cursor = raw.execute(_translate(sql), params)
+                    return _Rows(cursor.fetchall() if cursor.description else [])
+                except psycopg.OperationalError:
+                    # Conexión cortada por el servidor mientras estaba en reposo: el pool
+                    # la descarta al devolverla y se repite una vez con otra.
+                    if attempt == 1 and _dead(raw):
+                        retry = True
+                    else:
+                        raise
+            if retry:
+                self.pool.check()  # descarta también las demás conexiones cortadas
+                continue
+        raise RuntimeError("inalcanzable")
 
     def executescript(self, script: str) -> _Rows:
         with self.pool.connection() as raw:
@@ -291,10 +311,40 @@ def _configure_session(raw: Any) -> None:
     raw.commit()
 
 
+IDLE_CHECK_S = 60.0
+_LAST_USED: Any = None
+
+
+def _check_if_idle(raw: Any) -> None:
+    """Comprueba la conexión solo si llevaba un rato sin usarse.
+
+    Comprobarla antes de cada consulta costaba un viaje de ida y vuelta extra a
+    la base de datos (decenas de ms si está en otra región).
+    """
+    import time
+
+    from psycopg_pool import ConnectionPool
+
+    last = _LAST_USED.get(raw)
+    if last is None or time.monotonic() - last > IDLE_CHECK_S:
+        ConnectionPool.check_connection(raw)
+
+
+def _mark_used(raw: Any) -> None:
+    import time
+
+    _LAST_USED[raw] = time.monotonic()
+
+
 def _open_pool(url: str, timeout: float) -> PooledConnection:
+    import weakref
+
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
+    global _LAST_USED
+    if _LAST_USED is None:
+        _LAST_USED = weakref.WeakKeyDictionary()
     size = max(1, int(os.environ.get("IA_DB_POOL_SIZE", "5")))
     pool = ConnectionPool(
         url,
@@ -302,6 +352,10 @@ def _open_pool(url: str, timeout: float) -> PooledConnection:
         max_size=size,
         timeout=timeout,
         kwargs={
+            # Cada consulta suelta ya se confirmaba sola: en autocommit se evita
+            # el BEGIN y el COMMIT extra (dos viajes menos). db.transaction()
+            # sigue abriendo una transacción de verdad.
+            "autocommit": True,
             "row_factory": dict_row,
             "connect_timeout": int(timeout),
             "keepalives": 1,
@@ -310,7 +364,8 @@ def _open_pool(url: str, timeout: float) -> PooledConnection:
             "keepalives_count": 5,
         },
         configure=_configure_session,
-        check=ConnectionPool.check_connection,
+        check=_check_if_idle,
+        reset=_mark_used,
         open=False,
     )
     pool.open(wait=True, timeout=timeout)
@@ -453,9 +508,26 @@ class Transaction:
 @contextmanager
 def transaction(conn: Connection | PooledConnection) -> Iterator[Transaction]:
     if isinstance(conn, PooledConnection):
-        with conn.pool.connection() as raw, raw.transaction():
-            yield Transaction(lambda sql, params: raw.execute(_translate(sql), params))
-        return
+        import contextlib
+
+        import psycopg
+
+        for attempt in (1, 2):
+            stack = contextlib.ExitStack()
+            raw: Any = None
+            try:
+                raw = stack.enter_context(conn.pool.connection())
+                stack.enter_context(raw.transaction())
+            except psycopg.OperationalError:
+                broken = raw is None or _dead(raw)
+                stack.close()
+                if attempt == 1 and broken:
+                    conn.pool.check()
+                    continue  # la conexión estaba muerta antes de empezar: se reintenta
+                raise
+            with stack:
+                yield Transaction(lambda sql, params: raw.execute(_translate(sql), params))
+            return
     with _LOCK:
         try:
             yield Transaction(conn.execute)

@@ -353,7 +353,7 @@ def _store_remote(project: Any, language: str, video: Path, duration_ms: int) ->
     finally:
         if fitted != video:
             fitted.unlink(missing_ok=True)
-    return media_store.make_uri(os.environ.get("SUPABASE_BUCKET", "media"), key)
+    return media_store.make_uri(media_store.bucket(), key)
 
 
 def start(

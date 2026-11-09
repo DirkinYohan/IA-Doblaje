@@ -5,7 +5,8 @@
 | Backend (API, Whisper, traducción) | Azure Container Apps, plan Consumption, escala a cero | 0 € |
 | Imagen del backend | GitHub Container Registry (paquete público) | 0 € |
 | Frontend (Next.js) | Vercel | 0 € (plan Hobby) |
-| Base de datos y vídeos | Supabase | sin cambios |
+| Base de datos | Azure Database for PostgreSQL, B1ms, 32 GB (Canada Central) | 0 € los 12 primeros meses (750 h/mes gratis); después ~13–15 USD/mes |
+| Vídeos | Azure Blob Storage, contenedor privado `media` (East US) | 5 GB gratis 12 meses; después ~0,02 USD por GB al mes |
 | Correos | Brevo | sin cambios |
 
 ## Cómo duerme y despierta
@@ -54,6 +55,17 @@ export MSYS_NO_PATHCONV=1   # solo en Git Bash de Windows
 IA_AZ_ENVIRONMENT_ID=$(az containerapp env show -n <entorno> -g <grupo> --query id -o tsv) \
 IA_PUBLIC_URL=https://<tu-app>.vercel.app deploy/azure.sh
 ```
+
+### Base de datos y vídeos
+
+- PostgreSQL acepta conexiones solo desde servicios de Azure y desde las IP
+  añadidas en **Redes** del servidor (para desarrollar en local, añade la tuya).
+  East US no admite PostgreSQL en esta suscripción; por eso está en Canada Central.
+- El backend crea las tablas y activa RLS al arrancar.
+- Con Azure Blob no hay límite de 50 MB por archivo: los vídeos se guardan sin
+  comprimir y no hay tope de duración.
+- En `.env`: `IA_DATABASE_URL`, `IA_STORAGE_BACKEND=azure`,
+  `AZURE_STORAGE_CONNECTION_STRING` y `AZURE_STORAGE_CONTAINER`.
 
 ## 3. Frontend en Vercel
 

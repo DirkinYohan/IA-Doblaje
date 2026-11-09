@@ -29,3 +29,5 @@ tokenizers==0.23.2
 sentencepiece==0.2.2
 huggingface-hub==1.33.0
 requests==2.34.2
+azure-storage-blob==12.27.1
+azure-core==1.41.0

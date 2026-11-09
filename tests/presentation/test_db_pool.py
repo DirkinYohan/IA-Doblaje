@@ -156,3 +156,17 @@ def test_postgres_activa_rls_en_todas_las_tablas(pg_client) -> None:
     assert db.protect_tables(client.app.state.conn) == []
     sign_up(client, json={"name": "Rls", "email": "rls@example.com", "password": "secreto123", "confirm": "secreto123"})
     assert client.get("/api/auth/me").status_code == 200
+
+
+@pg
+def test_postgres_transaccion_se_recupera_si_el_servidor_corta_las_conexiones(pg_client) -> None:
+    client, admin, _schema = pg_client
+    conn = client.app.state.conn
+    db.one(conn, "SELECT 1")
+    admin.execute(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        "WHERE pid <> pg_backend_pid() AND datname = current_database()"
+    )
+    with db.transaction(conn) as tx:
+        tx.run("INSERT INTO users (id, name, email, password_hash, created_at) VALUES ('u9','A','z@b.co','h','t')")
+    assert db.one(conn, "SELECT COUNT(*) AS n FROM users WHERE id='u9'")["n"] == 1
