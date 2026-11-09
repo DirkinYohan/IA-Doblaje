@@ -148,32 +148,43 @@ def _write_thumbnail(media_path: Path, target: Path) -> bool:
         return False
 
 def _write_storyboard(media_path: Path, target: Path, *, frames: int = 14) -> bool:
+    """Tira de miniaturas para la línea de tiempo.
+
+    Salta directamente a cada instante (-ss antes de -i) en lugar de decodificar
+    el vídeo entero: en un vídeo largo eso tardaba más de un minuto y dejaba sin
+    CPU a la transcripción en vivo justo al abrir el proyecto.
+    """
     try:
+        import os
+        import shutil
+        import subprocess
+
         from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
 
         ok, ffmpeg_bin, _ = SubprocessFFmpegBinaryResolver().resolve("ffmpeg")
         if not ok:
             return False
-        import subprocess
-
         count = max(4, min(24, int(frames)))
         width, height = 176, 99
-        filtro = (
-            f"fps={count}/{max(1.0, _probe_duration_ms(media_path) / 1000):.6f},"
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},tile={count}x1"
+        duration = max(0.0, _probe_duration_ms(media_path) / 1000)
+        nice = shutil.which("nice") if os.name == "posix" else None
+        command = [*([nice, "-n", "19"] if nice else []), ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y"]
+        for index in range(count):
+            moment = duration * (index + 0.5) / count
+            command += ["-threads", "1", "-ss", f"{moment:.3f}", "-i", str(media_path)]
+        cells = ";".join(
+            f"[{index}:v:0]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1,trim=end_frame=1[c{index}]"
+            for index in range(count)
         )
+        joined = "".join(f"[c{index}]" for index in range(count))
+        command += [
+            "-filter_threads", "1",
+            "-filter_complex", f"{cells};{joined}hstack=inputs={count}[out]",
+            "-map", "[out]", "-frames:v", "1", "-q:v", "6", str(target),
+        ]
         target.parent.mkdir(parents=True, exist_ok=True)
-        completed = subprocess.run(
-            [
-                ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y",
-                "-i", str(media_path),
-                "-vf", filtro, "-frames:v", "1", "-q:v", "6", str(target),
-            ],
-            capture_output=True,
-            timeout=180,
-            check=False,
-        )
+        completed = subprocess.run(command, capture_output=True, timeout=180, check=False)
         return completed.returncode == 0 and target.is_file() and target.stat().st_size > 0
     except Exception:  # noqa: BLE001
         return False
