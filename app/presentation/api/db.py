@@ -362,6 +362,46 @@ def migrate(conn: Connection) -> None:
     _add_missing_columns(conn, "jobs", _JOB_COLUMNS)
     _add_missing_columns(conn, "subtitles", _SUBTITLE_COLUMNS)
     conn.commit()
+    if conn.backend == "postgres":
+        protect_tables(conn)
+
+
+def schema_tables() -> list[str]:
+    import re
+
+    return re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", _SCHEMA)
+
+
+def protect_tables(conn: Connection) -> list[str]:
+    """Activa RLS en las tablas del backend (Supabase).
+
+    Supabase publica una API REST para cada tabla de `public`; sin RLS, quien
+    tenga la clave anónima podría leerlas o modificarlas. El backend se conecta
+    como dueño de las tablas, así que RLS sin políticas no le afecta y cierra
+    esa puerta. Devuelve las tablas que se han protegido ahora.
+    """
+    import logging
+
+    log = logging.getLogger("ia.db")
+    ours = set(schema_tables())
+    rows = conn.execute(
+        "SELECT tablename, tableowner = current_user AS owned, rowsecurity "
+        "FROM pg_tables WHERE schemaname = current_schema()"
+    ).fetchall()
+    protected: list[str] = []
+    for row in rows:
+        name = str(row["tablename"])
+        if name not in ours or row["rowsecurity"]:
+            continue
+        if not row["owned"]:
+            log.warning("RLS: la tabla %s no es del usuario de la base; no se puede proteger", name)
+            continue
+        conn.execute(f'ALTER TABLE "{name}" ENABLE ROW LEVEL SECURITY')
+        protected.append(name)
+    conn.commit()
+    if protected:
+        log.warning("RLS activado en: %s", ", ".join(sorted(protected)))
+    return protected
 
 
 def _add_missing_columns(

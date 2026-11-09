@@ -143,3 +143,16 @@ def test_postgres_coordinacion_entre_procesos(pg_client, monkeypatch: pytest.Mon
     assert worker.claim(conn, "j1") is False
     assert cluster.acquire_lease(conn, "p1") is False
     assert render._claim(conn, "p1", "es", "v1") is None
+
+
+@pg
+def test_postgres_activa_rls_en_todas_las_tablas(pg_client) -> None:
+    client, admin, schema = pg_client
+    rows = admin.execute(
+        "SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname=%s", (schema,)
+    ).fetchall()
+    assert {name for name, _ in rows} >= set(db.schema_tables())
+    assert all(secure for name, secure in rows if name in db.schema_tables())
+    assert db.protect_tables(client.app.state.conn) == []
+    sign_up(client, json={"name": "Rls", "email": "rls@example.com", "password": "secreto123", "confirm": "secreto123"})
+    assert client.get("/api/auth/me").status_code == 200
