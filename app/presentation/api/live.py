@@ -319,6 +319,9 @@ class LiveSubtitler:
         self._publish(language, fresh, start, end)
 
     def _publish(self, language: str, fresh: list[dict[str, Any]], start: int, end: int) -> None:
+        if self._stopped:
+            # Detenido (p. ej. el proyecto se está borrando): no se vuelve a escribir nada.
+            return
         with self.data_lock:
             current = self.cues.setdefault(language, [])
             known = {(int(c["start_ms"]), int(c["end_ms"])) for c in current}

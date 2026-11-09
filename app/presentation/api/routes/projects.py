@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import uuid
@@ -42,6 +43,9 @@ from app.presentation.api.common import _write_storyboard
 from app.presentation.api.common import _write_thumbnail
 from app.presentation.api.context import ApiContext
 from app.presentation.api.schemas import RenameBody
+
+
+log = logging.getLogger("ia.projects")
 
 
 def _remove_when_free(path: Path, attempts: int = 30, interval: float = 1.0) -> None:
@@ -243,25 +247,20 @@ def build(ctx: ApiContext) -> APIRouter:
 
         render.forget(conn, paths["output"], project_id)
 
-        media_path = project["media_path"]
-        if media_store.is_remote(media_path):
-            key = media_store.object_key(media_path)
-            if key:
-                try:
-                    media_store.delete(key)
-                except Exception:  # noqa: BLE001 - borrar el proyecto manda
-                    pass
-        else:
-            _remove_when_free(Path(media_path))
+        for stored in (project["media_path"], str(project["thumbnail_path"] or "")):
+            if media_store.is_remote(stored):
+                key = media_store.object_key(stored)
+                if key:
+                    try:
+                        media_store.delete(key)
+                    except Exception as exc:  # noqa: BLE001 - borrar el proyecto manda, pero se avisa
+                        log.warning("borrar[%s]: no se pudo borrar %s de Storage: %s", project_id[:8], key, exc)
+            elif stored:
+                _remove_when_free(Path(stored))
 
-        thumb_path = str(project["thumbnail_path"] or "")
-        if media_store.is_remote(thumb_path):
-            thumb_key = media_store.object_key(thumb_path)
-            if thumb_key:
-                try:
-                    media_store.delete(thumb_key)
-                except Exception:  # noqa: BLE001
-                    pass
+        media_store.drop_pending(paths["temp"], project_id)
+        for cached in (paths["temp"] / "storyboards").glob(f"{project_id}-*.jpg"):
+            cached.unlink(missing_ok=True)
 
         with db.transaction(conn) as tx:
             tx.run("DELETE FROM live_leases WHERE project_id=?", (project_id,))

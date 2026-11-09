@@ -162,9 +162,12 @@ class SupabaseStorage:
 
         try:
             with httpx.Client(timeout=self._timeout) as client:
-                client.delete(self._object_url(key), headers=self._headers())
+                response = client.delete(self._object_url(key), headers=self._headers())
         except httpx.HTTPError as exc:  # pragma: no cover - red
             raise StorageError(f"error de red borrando {key}: {exc}") from exc
+        # 404: ya no estaba, que es lo que se quería.
+        if response.status_code >= 400 and response.status_code != 404:
+            raise StorageError(f"no se pudo borrar {key}: {response.status_code} {response.text[:200]}")
 
     def exists(self, key: str) -> bool:
         import httpx
