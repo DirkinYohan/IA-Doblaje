@@ -81,9 +81,11 @@ def build_context(app: Any, conn: Any, paths: dict[str, Path], settings: Any) ->
         cluster.issue_ticket(conn, token_hash(ticket), user_id, WS_TICKET_TTL_S)
         return ticket
 
-    def user_from_ticket_or_cookie(ticket: str | None, token: str | None) -> sqlite3_row:
+    def user_from_ticket_or_cookie(
+        ticket: str | None, token: str | None, started_at: float | None = None
+    ) -> sqlite3_row:
         if ticket:
-            user_id = cluster.consume_ticket(conn, token_hash(ticket))
+            user_id = cluster.consume_ticket(conn, token_hash(ticket), at=started_at)
             if user_id is None:
                 raise HTTPException(status_code=401, detail="Ticket inválido o caducado")
             row = db.one(conn, "SELECT * FROM users WHERE id=?", (user_id,))

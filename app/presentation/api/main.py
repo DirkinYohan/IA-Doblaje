@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -27,6 +28,20 @@ from app.presentation.api.routes import system
 from app.presentation.api.cluster import DbRateLimiter
 
 
+class _StampArrival:
+    """Anota cuándo llegó la petición, antes de leer el cuerpo (subidas largas)."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") == "http":
+            import time
+
+            scope.setdefault("state", {})["started_at"] = time.time()
+        await self.app(scope, receive, send)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     paths = _paths()
@@ -40,6 +55,7 @@ def create_app() -> FastAPI:
         conn.close()
 
     app = FastAPI(title="IA Doblaje", version="0.1.0", lifespan=_lifespan)
+    app.add_middleware(_StampArrival)
     origins = [
         o.strip()
         for o in os.environ.get(

@@ -25,6 +25,7 @@ from app.presentation.api import media_upload
 from app.presentation.api import storage_fit
 from app.presentation.api.common import OFFICIAL
 from app.presentation.api.common import UPLOAD_CHUNK
+from app.presentation.api.common import WEB_REMUX_EXTENSIONS
 from app.presentation.api.common import _create_job
 from app.presentation.api.common import _ensure_project_metadata
 from app.presentation.api.common import _guess_mime
@@ -35,6 +36,7 @@ from app.presentation.api.common import _probe_duration_ms
 from app.presentation.api.common import _probe_streams
 from app.presentation.api.common import _project
 from app.presentation.api.common import _raise_engine_error
+from app.presentation.api.common import _remux_for_web
 from app.presentation.api.common import _safe_filename
 from app.presentation.api.common import _write_storyboard
 from app.presentation.api.common import _write_thumbnail
@@ -92,7 +94,9 @@ def build(ctx: ApiContext) -> APIRouter:
         ticket: str | None = None,
         ia_session: str | None = Cookie(default=None),
     ) -> dict[str, Any]:
-        row = ctx.user_from_ticket_or_cookie(ticket, ia_session)
+        row = ctx.user_from_ticket_or_cookie(
+            ticket, ia_session, started_at=getattr(request.state, "started_at", None)
+        )
         source = source_language.strip().lower()
         targets = [p.strip().lower() for p in target_languages.split(",") if p.strip()]
         if source not in OFFICIAL | {"und"} or not targets or any(t not in OFFICIAL for t in targets):
@@ -147,6 +151,15 @@ def build(ctx: ApiContext) -> APIRouter:
             target.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail="El archivo está vacío")
 
+        if ext in WEB_REMUX_EXTENSIONS:
+            web = _remux_for_web(target)
+            if web is not None:
+                final = target.with_suffix(".mp4")
+                target.unlink(missing_ok=True)
+                web.replace(final)
+                target = final
+                written = target.stat().st_size
+
         duration_ms = _probe_duration_ms(target)
 
         background: dict[str, Any] | None = None
@@ -156,7 +169,7 @@ def build(ctx: ApiContext) -> APIRouter:
             except storage_fit.TooLongForStorage as exc:
                 target.unlink(missing_ok=True)
                 raise HTTPException(status_code=413, detail=str(exc)) from exc
-            stored_name = f"{Path(filename).stem}.mp4" if compress else filename
+            stored_name = f"{Path(filename).stem}.mp4" if compress else f"{Path(filename).stem}{target.suffix}"
             media_key = f"{row['id']}/{project_id}/{stored_name}"
             thumb_key = f"{row['id']}/{project_id}/thumbnail.jpg"
             thumb_temp = paths["temp"] / "uploads" / f"{project_id}-thumbnail.jpg"

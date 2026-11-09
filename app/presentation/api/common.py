@@ -147,6 +147,44 @@ def _write_thumbnail(media_path: Path, target: Path) -> bool:
     except Exception:  # noqa: BLE001
         return False
 
+WEB_REMUX_EXTENSIONS = {"mp4", "mov", "m4v"}
+
+
+def _remux_for_web(source: Path) -> Path | None:
+    """Reordena el MP4/MOV para que el navegador empiece a reproducir enseguida.
+
+    Muchos vídeos de móvil o de editores traen el índice (moov) al final o el
+    audio y el vídeo mal intercalados: el navegador tiene que saltar por todo el
+    archivo antes de empezar. Copiar las pistas sin recodificar (-c copy) con
+    +faststart lo arregla en segundos y sin perder calidad. None si no se pudo.
+    """
+    try:
+        import subprocess
+
+        from app.infrastructure.audio.ffmpeg_adapters import SubprocessFFmpegBinaryResolver
+
+        ok, ffmpeg_bin, _ = SubprocessFFmpegBinaryResolver().resolve("ffmpeg")
+        if not ok:
+            return None
+        target = source.with_name(f"{source.stem}.web.mp4")
+        completed = subprocess.run(
+            [
+                ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+                "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
+                "-movflags", "+faststart", "-f", "mp4", str(target),
+            ],
+            capture_output=True,
+            timeout=900,
+            check=False,
+        )
+        if completed.returncode == 0 and target.is_file() and target.stat().st_size > 0:
+            return target
+        target.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 - si falla se usa el original
+        pass
+    return None
+
+
 def _write_storyboard(media_path: Path, target: Path, *, frames: int = 14) -> bool:
     """Tira de miniaturas para la línea de tiempo.
 

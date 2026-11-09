@@ -13,6 +13,9 @@ HEARTBEAT_S = float(os.environ.get("IA_HEARTBEAT_S", "5"))
 STALE_S = float(os.environ.get("IA_STALE_S", "30"))
 
 
+TICKET_GRACE_S = 6 * 3600
+
+
 def now() -> float:
     return time.time()
 
@@ -43,20 +46,23 @@ class DbRateLimiter:
 def issue_ticket(conn: Any, token_hash: str, user_id: str, ttl_s: float) -> None:
     moment = now()
     with db.transaction(conn) as tx:
-        tx.run("DELETE FROM ws_tickets WHERE expires_at < ?", (moment,))
+        # Margen: una subida larga valida su ticket con la hora en que empezó.
+        tx.run("DELETE FROM ws_tickets WHERE expires_at < ?", (moment - TICKET_GRACE_S,))
         tx.run(
             "INSERT INTO ws_tickets (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
             (token_hash, user_id, moment + ttl_s),
         )
 
 
-def consume_ticket(conn: Any, token_hash: str) -> str | None:
+def consume_ticket(conn: Any, token_hash: str, *, at: float | None = None) -> str | None:
+    """`at`: hora a la que llegó la petición (una subida larga no caduca a mitad)."""
     with db.transaction(conn) as tx:
         row = tx.one(
             "DELETE FROM ws_tickets WHERE token_hash=? RETURNING user_id, expires_at",
             (token_hash,),
         )
-    if row is None or float(row["expires_at"]) < now():
+    moment = now() if at is None else min(float(at), now())
+    if row is None or float(row["expires_at"]) < moment:
         return None
     return str(row["user_id"])
 
