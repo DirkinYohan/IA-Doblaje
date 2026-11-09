@@ -170,3 +170,33 @@ def link_valid(project_id: str, expires: int, signature: str, *, now: float | No
     if expires < (now or time.time()):
         return False
     return hmac.compare_digest(_signature(project_id, int(expires)), str(signature))
+
+
+PROXY_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges", "last-modified", "etag")
+
+
+def open_remote(url: str, range_header: str | None) -> Any:
+    """Abre el vídeo de Storage para reenviarlo; el llamador debe cerrarlo."""
+    import httpx
+
+    client = httpx.Client(timeout=httpx.Timeout(30.0, read=None), follow_redirects=True)
+    # Sin compresión: un trozo de un gzip no se puede descomprimir por separado.
+    headers = {"Accept-Encoding": "identity"}
+    if range_header:
+        headers["Range"] = range_header
+    try:
+        response = client.send(client.build_request("GET", url, headers=headers), stream=True)
+    except Exception:
+        client.close()
+        raise
+    response.extensions["ia_client"] = client
+    return response
+
+
+def close_remote(response: Any) -> None:
+    try:
+        response.close()
+    finally:
+        client = response.extensions.get("ia_client") if hasattr(response, "extensions") else None
+        if client is not None:
+            client.close()

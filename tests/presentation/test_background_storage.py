@@ -216,7 +216,34 @@ def test_mientras_se_guarda_redirige_directo_al_backend(
     stored = client.get(f"/api/videos/{project_id}/media", follow_redirects=False)
     assert stored.status_code == 307
     assert stored.headers["location"] == "https://storage.example/firmada"
-    assert anonymous.get(path, follow_redirects=False).headers["location"] == "https://storage.example/firmada"
+    # El enlace directo nunca salta a otro servidor: primero la copia local...
+    again = anonymous.get(path, headers={"Range": "bytes=0-3"}, follow_redirects=False)
+    assert again.status_code == 206 and again.content == b"RIFF"
+
+    # ...y cuando ya no existe, el backend reenvía los trozos de Storage.
+    from app.core.config import get_settings
+
+    media_store.drop_pending(Path(str(get_settings().paths.data_temp_dir)), project_id)
+    seen: dict[str, object] = {}
+
+    class _Upstream:
+        status_code = 206
+        headers = {"content-type": "audio/wav", "content-range": "bytes 0-3/4004", "content-length": "4", "x-otro": "no"}
+
+        def iter_raw(self, _size: int):
+            yield b"RIFF"
+
+    def fake_open(url: str, range_header: str | None) -> _Upstream:
+        seen.update(url=url, range=range_header)
+        return _Upstream()
+
+    monkeypatch.setattr(media_upload, "open_remote", fake_open)
+    monkeypatch.setattr(media_upload, "close_remote", lambda r: seen.update(closed=True))
+    proxied = anonymous.get(path, headers={"Range": "bytes=0-3"}, follow_redirects=False)
+    assert proxied.status_code == 206 and proxied.content == b"RIFF"
+    assert proxied.headers["content-range"] == "bytes 0-3/4004"
+    assert "x-otro" not in proxied.headers
+    assert seen == {"url": "https://storage.example/firmada", "range": "bytes=0-3", "closed": True}
 
 
 def test_enlace_caducado() -> None:
