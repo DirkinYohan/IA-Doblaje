@@ -247,7 +247,15 @@ def purge_temp(temp_dir: Path, *, attempts: int = 1, interval: float = 0.0) -> b
     return not folder.exists()
 
 
-def signed_url(media_path: Any, *, expires_in: int = 3600) -> str | None:
+def attachment_header(name: str) -> str:
+    """Content-Disposition para que el navegador descargue con este nombre."""
+    from urllib.parse import quote
+
+    ascii_name = name.encode("ascii", "ignore").decode().replace('"', "") or "video.mp4"
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+
+
+def signed_url(media_path: Any, *, expires_in: int = 3600, download: str | None = None) -> str | None:
     if not is_remote(media_path):
         return None
     store = client()
@@ -257,6 +265,8 @@ def signed_url(media_path: Any, *, expires_in: int = 3600) -> str | None:
     if not key:
         return None
     try:
+        if download:
+            return store.signed_url(key, expires_in=expires_in, download=download)
         return store.signed_url(key, expires_in=expires_in)
     except StorageError:
         return None

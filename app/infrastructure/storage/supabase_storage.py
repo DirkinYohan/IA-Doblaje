@@ -179,7 +179,7 @@ class SupabaseStorage:
             return False
         return response.status_code < 400
 
-    def signed_url(self, key: str, *, expires_in: int = 3600) -> str:
+    def signed_url(self, key: str, *, expires_in: int = 3600, download: str | None = None) -> str:
         import httpx
 
         try:
@@ -197,6 +197,9 @@ class SupabaseStorage:
         signed = str(data.get("signedURL") or data.get("signedUrl") or "")
         if not signed:
             raise StorageError(f"respuesta sin URL firmada para {key}: {data}")
-        if signed.startswith("http"):
-            return signed
-        return f"{self.url}/storage/v1{signed}"
+        url = signed if signed.startswith("http") else f"{self.url}/storage/v1{signed}"
+        if download:
+            from urllib.parse import quote
+
+            url += ("&" if "?" in url else "?") + f"download={quote(download)}"
+        return url

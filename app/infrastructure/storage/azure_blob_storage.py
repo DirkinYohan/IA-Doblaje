@@ -120,8 +120,12 @@ class AzureBlobStorage:
         except Exception:  # noqa: BLE001
             return False
 
-    def signed_url(self, key: str, *, expires_in: int = 3600) -> str:
-        """URL temporal de solo lectura (SAS); admite peticiones por rangos."""
+    def signed_url(self, key: str, *, expires_in: int = 3600, download: str | None = None) -> str:
+        """URL temporal de solo lectura (SAS); admite peticiones por rangos.
+
+        `download`: nombre de archivo; Azure responde como adjunto y el navegador lo
+        descarga en vez de abrirlo (el atributo download no vale entre dominios).
+        """
         from azure.storage.blob import BlobSasPermissions
         from azure.storage.blob import generate_blob_sas
 
@@ -136,8 +140,15 @@ class AzureBlobStorage:
             permission=BlobSasPermissions(read=True),
             start=now - timedelta(minutes=5),
             expiry=now + timedelta(seconds=int(expires_in)),
+            content_disposition=_attachment(download) if download else None,
         )
         return f"{self._blob(key).url}?{token}"
+
+
+def _attachment(name: str) -> str:
+    from app.presentation.api.media_store import attachment_header
+
+    return attachment_header(name)
 
 
 __all__ = ["DEFAULT_CONTAINER", "AzureBlobStorage"]

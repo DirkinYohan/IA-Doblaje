@@ -64,28 +64,24 @@ def build(ctx: ApiContext) -> APIRouter:
     def render_file(
         project_id: str, lang: str, ticket: str | None = None, ia_session: str | None = Cookie(default=None)
     ) -> Response:
-        from urllib.parse import quote
-
         from app.presentation.api import render
 
         row = ctx.user_from_ticket_or_cookie(ticket, ia_session)
         project, _cues, _stamp = _render_track(project_id, row["id"], lang)
+        base = Path(str(project["title"] or "video")).stem.replace("_", " ").strip() or "video"
+        name = f"{base} ({lang}).mp4"
         video = render.ready_file(paths["output"], project_id, lang)
         if video is None:
             remote = render.stored_file(conn, project_id, lang)
-            url = media_store.signed_url(remote, expires_in=3600) if remote else None
+            # Firmado como adjunto: el navegador lo descarga en vez de abrirlo en otra página.
+            url = media_store.signed_url(remote, expires_in=3600, download=name) if remote else None
             if url:
                 return RedirectResponse(url, status_code=307)
             raise HTTPException(status_code=404, detail="El vídeo todavía no está listo")
-        base = Path(str(project["title"] or "video")).stem.replace("_", " ").strip() or "video"
-        name = f"{base} ({lang}).mp4"
-        ascii_name = name.encode("ascii", "ignore").decode() or f"video-{lang}.mp4"
         return FileResponse(
             video,
             media_type="video/mp4",
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
-            },
+            headers={"Content-Disposition": media_store.attachment_header(name)},
         )
 
     return router

@@ -76,3 +76,17 @@ def test_sin_limite_de_tamano_en_azure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert storage_fit.needs_fit(5 * 1024**3, 3 * 3600 * 1000) is False  # 5 GB y 3 h: se guarda tal cual
     monkeypatch.setenv("IA_STORAGE_BACKEND", "supabase")
     assert storage_fit.limit_bytes() == 50 * 1024 * 1024
+
+
+@azure
+def test_enlace_de_descarga_llega_como_adjunto(store: AzureBlobStorage) -> None:
+    store.upload_bytes("u1/p1/renders/fr.mp4", b"RIFFvideo", "video/mp4")
+    url = store.signed_url("u1/p1/renders/fr.mp4", expires_in=600, download="Mi vídeo (fr).mp4")
+    response = httpx.get(url)
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert 'filename="Mi vdeo (fr).mp4"' in disposition
+    assert "filename*=UTF-8''Mi%20v%C3%ADdeo%20%28fr%29.mp4" in disposition
+    plain = httpx.get(store.signed_url("u1/p1/renders/fr.mp4", expires_in=600))
+    assert "content-disposition" not in plain.headers  # para reproducir no se fuerza la descarga

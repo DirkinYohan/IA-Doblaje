@@ -254,3 +254,32 @@ def test_enlace_caducado() -> None:
     assert media_upload.link_valid("p9", expires, signature)
     assert not media_upload.link_valid("p9", expires, signature, now=expires + 1)
     assert not media_upload.link_valid("otro", expires, signature)
+
+
+def test_descarga_del_mp4_guardado_se_firma_como_adjunto(
+    client: TestClient, storage: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.presentation.api import render
+
+    upload = client.post(
+        "/api/videos",
+        files={"file": ("Mi clase.wav", PAYLOAD, "audio/wav")},
+        data={"source_language": "en", "target_languages": "es"},
+    )
+    project_id = upload.json()["id"]
+    storage["release"].set()  # type: ignore[union-attr]
+    seen: dict[str, object] = {}
+
+    def fake_signed(media_path: str, *, expires_in: int = 3600, download: str | None = None) -> str:
+        seen.update(path=media_path, download=download)
+        return "https://storage.example/firmada-adjunto"
+
+    monkeypatch.setattr(media_store, "signed_url", fake_signed)
+    monkeypatch.setattr(render, "ready_file", lambda *a: None)
+    monkeypatch.setattr(render, "stored_file", lambda *a: "storage://media/u/p/renders/es.mp4")
+    cues = [{"index": 1, "start_ms": 0, "end_ms": 1000, "text": "Hola", "speaker": ""}]
+    assert client.put(f"/api/subtitles/{project_id}", json={"language": "es", "cues": cues}).status_code == 200
+    response = client.get(f"/api/videos/{project_id}/render/file?lang=es", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "https://storage.example/firmada-adjunto"
+    assert seen == {"path": "storage://media/u/p/renders/es.mp4", "download": "Mi clase (es).mp4"}
