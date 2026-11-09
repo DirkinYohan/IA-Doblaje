@@ -254,25 +254,49 @@ def _loop(conn: Any, generation: int) -> None:
             if from_queue:
                 current.task_done()
             continue
-        try:
+        if _mode_of(conn, job_id) == "progressive":
+            # Un trabajo progresivo solo espera al modo en vivo y lo cierra: en su
+            # propio hilo, para que el de otro vídeo no espere a que acabe este.
+            threading.Thread(
+                target=_execute, args=(conn, job_id, current, from_queue),
+                kwargs={"purge": False}, name=f"job-{job_id[:8]}", daemon=True,
+            ).start()
+            continue
+        _execute(conn, job_id, current, from_queue)
+
+
+def _mode_of(conn: Any, job_id: str) -> str:
+    try:
+        row = db.one(conn, "SELECT mode FROM jobs WHERE id=?", (job_id,))
+    except Exception:  # noqa: BLE001
+        return "full"
+    return str(row["mode"] or "full") if row is not None else "full"
+
+
+def _execute(conn: Any, job_id: str, current: Any, from_queue: bool, *, purge: bool = True) -> None:
+    # Los temporales materializados son de los trabajos completos; uno progresivo
+    # en paralelo no debe borrárselos a otro.
+    try:
+        if purge:
             _purge_media_temp()
-            _run_claimed(conn, job_id)
-        except Exception as exc:  # noqa: BLE001
+        _run_claimed(conn, job_id)
+    except Exception as exc:  # noqa: BLE001
+        try:
+            db.run(
+                conn,
+                "UPDATE jobs SET status='FAILED', error=?, updated_at=? WHERE id=?",
+                (str(exc), _utcnow(), job_id),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        if purge:
+            _purge_media_temp()
+        if from_queue:
             try:
-                db.run(
-                    conn,
-                    "UPDATE jobs SET status='FAILED', error=?, updated_at=? WHERE id=?",
-                    (str(exc), _utcnow(), job_id),
-                )
+                current.task_done()
             except Exception:  # noqa: BLE001
                 pass
-        finally:
-            _purge_media_temp()
-            if from_queue:
-                try:
-                    current.task_done()
-                except Exception:  # noqa: BLE001
-                    pass
 
 
 def _run_job(conn: Any, job_id: str) -> None:
@@ -304,7 +328,8 @@ def _run_job(conn: Any, job_id: str) -> None:
 
         _run_job_full(conn, job_id, job, project)
     finally:
-        _purge_media_temp()
+        if mode != "progressive":
+            _purge_media_temp()
         try:
             media_store.drop_pending(
                 Path(str(get_settings().paths.data_temp_dir)), str(project["id"])

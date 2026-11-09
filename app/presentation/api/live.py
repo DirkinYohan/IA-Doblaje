@@ -394,12 +394,9 @@ class LiveRunner:
                 listener(event)
             except Exception:  # noqa: BLE001 - un cliente roto no frena a los demás
                 pass
-        if (
-            event.get("type") == "cues"
-            and self.on_progress is not None
-            and self.subtitler is not None
-            and event.get("language") == self.subtitler.source
-        ):
+        # Cualquier idioma cuenta: el porcentaje incluye las traducciones, y si solo
+        # se actualizaba con el idioma original se quedaba quieto al terminar este.
+        if event.get("type") == "cues" and self.on_progress is not None and self.subtitler is not None:
             self.on_progress(self)
 
     def attach(self, listener: Listener) -> tuple[dict[str, Any], Callable[[], None]]:
@@ -669,6 +666,7 @@ class JobTracker:
         self.job_id = job_id
         self._lock = threading.Lock()
         self._percent = 0
+        self._covered = -1
 
     def stage(self, stage: str, percent: int, status: str = "PROCESSING", **extra: Any) -> None:
         from app.presentation.api import db, worker
@@ -714,9 +712,15 @@ class JobTracker:
         if subtitler is None:
             return
         covered = subtitler._ranges(subtitler.source).prefix_end() if subtitler.source else 0
+        percent = max(3, min(95, subtitler.progress()))
+        with self._lock:
+            # Sin cambios no se escribe: llega un lote por idioma y tramo.
+            if percent <= self._percent and covered == self._covered:
+                return
+            self._covered = covered
         self.stage(
             "CUES_READY",
-            max(3, min(95, subtitler.progress())),
+            percent,
             "TRANSCRIBING",
             last_cue_ms=covered,
             duration_ms=subtitler.duration_ms,
