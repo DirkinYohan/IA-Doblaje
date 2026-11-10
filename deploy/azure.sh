@@ -32,6 +32,9 @@ BREVO_KEY="$(value BREVO_API_KEY)"
 MAIL_FROM="$(value MAIL_FROM_EMAIL)"
 MAIL_NAME="$(value MAIL_FROM_NAME)"
 PUBLIC_URL="${IA_PUBLIC_URL:-https://example.com}"
+# Otros orígenes que pueden llamar al backend (separados por comas), p. ej. la
+# URL de Vercel mientras se estrena un dominio propio.
+CORS_LIST="$PUBLIC_URL${IA_EXTRA_ORIGINS:+,$IA_EXTRA_ORIGINS}"
 
 for name in DATABASE_URL STORAGE_CONNECTION BREVO_KEY MAIL_FROM; do
   if [ -z "${!name}" ]; then
@@ -72,7 +75,7 @@ ENV_VARS=(
   "MAIL_FROM_EMAIL=$MAIL_FROM"
   "MAIL_FROM_NAME=${MAIL_NAME:-IA Doblaje}"
   "APP_PUBLIC_URL=$PUBLIC_URL"
-  "CORS_ORIGINS=$PUBLIC_URL"
+  "CORS_ORIGINS=$CORS_LIST"
   "IA_DB_POOL_SIZE=3"
 )
 # URL pública del propio backend: el navegador descarga de aquí sin pasar por Vercel.

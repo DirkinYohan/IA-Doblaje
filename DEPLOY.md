@@ -47,6 +47,14 @@ de tu `.env`. Al final imprime la URL del backend.
 
 Para desplegar una versión concreta: `deploy/azure.sh <commit>`.
 
+Con dominio propio, `IA_PUBLIC_URL` es la dirección principal (la de los enlaces
+de los correos) e `IA_EXTRA_ORIGINS` añade otras desde las que se puede usar la
+API, separadas por comas:
+
+```bash
+IA_PUBLIC_URL=https://www.iadoblaje.online IA_EXTRA_ORIGINS=https://iadoblaje.online,https://video-subtitles-amm4.vercel.app deploy/azure.sh
+```
+
 Si la suscripción ya tiene un entorno de Container Apps (algunas solo admiten
 uno), reutilízalo; la app sigue siendo independiente de las demás:
 
